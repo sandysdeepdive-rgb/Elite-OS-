@@ -1,0 +1,89 @@
+@import "tailwindcss";
+@config "../tailwind.config.ts";
+
+.mesh-gradient-bg {
+  background-color: #fbf9f4;
+  background-image:
+    radial-gradient(at 80% 20%, rgba(43, 77, 90, 0.07) 0, transparent 50%),
+    radial-gradient(at 20% 80%, rgba(181, 168, 152, 0.1) 0, transparent 50%);
+  position: relative;
+}
+.mesh-gradient-bg::before {
+  content: "";
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  opacity: 0.02;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  z-index: 0;
+}
+.wave-orb {
+  filter: blur(40px);
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(43,77,90,0.1) 0%, rgba(181,168,152,0.1) 100%);
+}
+.material-symbols-outlined {
+  font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 24;
+}
+
+.mesh-gradient {
+  background-color: #F4F2ED;
+  background-image:
+    radial-gradient(at 100% 0%, rgba(43, 77, 90, 0.05) 0px, transparent 50%),
+    radial-gradient(at 0% 100%, rgba(20, 20, 22, 0.03) 0px, transparent 50%);
+  position: relative;
+}
+
+.grain-overlay, .grain-texture {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  opacity: 0.02;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+.mesh-bg, .signature-mesh {
+  background: radial-gradient(at top right, rgba(43, 77, 90, 0.07), transparent),
+              radial-gradient(at bottom left, rgba(181, 168, 152, 0.1), transparent);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.asymmetric-layout {
+  grid-template-columns: 1fr 1.2fr;
+}
+
+.brand-mark {
+  width: 40px;
+  height: 40px;
+  background: #2b4d5a;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+}
+
+.brand-bar {
+  height: 2px;
+  background: white;
+  border-radius: 1px;
+}
+
+@keyframes wave-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%  { transform: translate(3%, -4%) scale(1.04); }
+  66%  { transform: translate(-2%, 3%) scale(0.97); }
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
