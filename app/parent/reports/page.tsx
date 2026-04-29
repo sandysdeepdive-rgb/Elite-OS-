@@ -7,6 +7,7 @@ import BottomNavBar, { PARENT_NAV_ITEMS } from "@/components/layout/BottomNavBar
 import CollectionErrorBanner from "@/components/ui/CollectionErrorBanner";
 import { useParentData } from "@/lib/hooks/useParentData";
 import { useChildCollection } from "@/lib/hooks/useSchoolData";
+import { generateReportCardPDF } from "@/lib/utils/generateReportCard";
 
 interface Report {
   id: string;
@@ -104,6 +105,9 @@ export default function ParentReportsPage() {
   const { data: reports, error: reportsError } = useChildCollection<Report>(
     parentProfile?.schoolId || null, "reports", studentRecord?.id || null
   );
+  const { data: attendance } = useChildCollection<any>(
+    parentProfile?.schoolId || null, "attendance", studentRecord?.id || null
+  );
 
   const childReports = reports;
 
@@ -154,6 +158,41 @@ export default function ParentReportsPage() {
 
   const parentInitials = parentProfile?.name ? parentProfile.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : "PN";
 
+  const childAttendance = attendance;
+  const presentCount = childAttendance.filter((a: any) => a.status === "present").length;
+  const absentCount = childAttendance.filter((a: any) => a.status === "absent").length;
+  const lateCount = childAttendance.filter((a: any) => a.status === "late").length;
+  const total = childAttendance.length;
+  const attendancePct = total > 0 ? Math.round((presentCount / total) * 100) : 0;
+
+  const handleDownloadReport = () => {
+    if (!studentRecord || !parentProfile) return;
+  
+    generateReportCardPDF({
+      studentName:   studentRecord.name,
+      studentId:     studentRecord.id,
+      class:         studentRecord.class,
+      term:          "Term 2",
+      year:          "2025",
+      schoolName:    parentProfile.schoolName || "EliteSchool's",
+      grades:        childReports.map(r => ({
+        subject:     r.subject,
+        score:       r.score,
+        letterGrade: r.letterGrade,
+        remarks:     r.remarks,
+      })),
+      attendance: {
+        present:    presentCount,
+        absent:     absentCount,
+        late:       lateCount,
+        percentage: attendancePct,
+      },
+      generatedAt: new Date().toLocaleDateString("en-UG", {
+        day:"2-digit", month:"short", year:"numeric"
+      }),
+    });
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen mesh-gradient-bg
@@ -194,12 +233,13 @@ export default function ParentReportsPage() {
               </p>
             </div>
             <button
-              onClick={() => window.print()}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-full border border-[#2B4D5A]/30 text-[#2B4D5A] text-sm hover:bg-[#2B4D5A]/5 transition-colors"
+              onClick={handleDownloadReport}
+              disabled={childReports.length === 0}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-full border border-[#2B4D5A]/30 text-[#2B4D5A] text-sm hover:bg-[#2B4D5A]/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ fontFamily: "'DM Sans', sans-serif" }}
             >
               <span className="material-symbols-outlined text-[18px]">download</span>
-              Download PDF
+              Download Report Card
             </button>
           </div>
 

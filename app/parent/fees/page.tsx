@@ -7,8 +7,10 @@ import BottomNavBar, { PARENT_NAV_ITEMS } from "@/components/layout/BottomNavBar
 import CollectionErrorBanner from "@/components/ui/CollectionErrorBanner";
 import { useParentData } from "@/lib/hooks/useParentData";
 import { useChildCollection } from "@/lib/hooks/useSchoolData";
-import { doc, updateDoc } from "firebase/firestore";
+import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
+import { Payments } from "@/lib/utils/payments";
+import { toast } from "sonner";
 
 interface FeeRecord {
   id: string;
@@ -123,38 +125,51 @@ export default function ParentFeesPage() {
 
   const childFee = fees[0];
 
-  const handleMockPayment = async () => {
-    if (!parentProfile?.schoolId || !childFee ||
-        !paymentAmount) return;
+  const handleInitiatePayment = async () => {
+    if (!parentProfile?.schoolId || !childFee || !paymentAmount || !studentRecord) return;
+    
+    // Check if phone number is valid (Uganda format)
+    if (payMethod !== "bank" && !/^(07|2567|7)\d{8}$/.test(phoneNumber.replace(/\s/g, ""))) {
+      toast.error("Please enter a valid Uganda phone number");
+      return;
+    }
+
     setPaying(true);
 
-    // Simulate payment processing delay
-    await new Promise(r => setTimeout(r, 1500));
+    try {
+      let res;
+      const paymentData = {
+        amount: Number(paymentAmount),
+        phone: phoneNumber,
+        studentId: studentRecord.id,
+        studentName: studentRecord.name,
+        schoolId: parentProfile.schoolId,
+      };
 
-    const amount = Number(paymentAmount);
-    const newPaid = (childFee.amountPaid || 0) + amount;
-    const newBalance = (childFee.termFee || 0) - newPaid;
-
-    await updateDoc(
-      doc(db, "schools", parentProfile.schoolId,
-              "fees", childFee.id),
-      {
-        amountPaid: newPaid,
-        balance: Math.max(0, newBalance),
-        status: newBalance <= 0 ? "paid"
-               : newPaid > 0 ? "partial" : "unpaid",
-        lastPayment: new Date().toLocaleDateString(
-          "en-UG", { day:"2-digit", month:"short" }
-        ),
-        paymentMethod,
-        lastPaymentPhone: phoneNumber,
+      if (payMethod === "mtn") {
+        res = await Payments.initiateMoMo(paymentData);
+      } else if (payMethod === "airtel") {
+        res = await Payments.initiateAirtel(paymentData);
+      } else {
+        // Bank transfer - just log intent or show info
+        toast.info("Please complete the bank transfer and contact the school office.");
+        setPaying(false);
+        return;
       }
-    );
 
-    setPaying(false);
-    setPaymentSuccess(true);
-    setPaymentAmount("");
-    setPhoneNumber("");
+      if (res.success) {
+        setTxnRef(res.txnRef || "");
+        setPayStep("success");
+        // In a real app, we would start polling here
+        toast.success("Payment request sent! Check your phone.");
+      } else {
+        toast.error(res.error || "Failed to initiate payment");
+      }
+    } catch (err) {
+      toast.error("Something went wrong");
+    } finally {
+      setPaying(false);
+    }
   };
 
   const totalDue   = childFee?.termFee || 0;
@@ -496,9 +511,11 @@ export default function ParentFeesPage() {
                       style={{ borderColor:"rgba(193,199,203,0.4)", color:"#72787b", fontFamily:"'DM Sans', sans-serif" }}>
                       Back
                     </button>
-                    <button onClick={handleMockPayment}
-                      className="flex-1 py-3 rounded-full text-sm font-medium text-white hover:opacity-90 active:scale-95"
+                    <button onClick={handleInitiatePayment}
+                      disabled={paying || (payMethod !== "bank" && phoneNumber.length < 10)}
+                      className="flex-1 py-3 rounded-full text-sm font-medium text-white hover:opacity-90 active:scale-95 disabled:opacity-40 flex items-center justify-center gap-2"
                       style={{ background:"#2B4D5A", fontFamily:"'DM Sans', sans-serif" }}>
+                      {paying && <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
                       Confirm &amp; Pay
                     </button>
                   </div>

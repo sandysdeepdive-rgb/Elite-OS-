@@ -5,25 +5,30 @@ service cloud.firestore {
     function isAuthenticated() {
       return request.auth != null;
     }
+
+    function isApproved() {
+      return isAuthenticated() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'approved';
+    }
     
     function isOwner(uid) {
       return isAuthenticated() && request.auth.uid == uid;
     }
     
     function isAdmin(schoolId) {
-      return isAuthenticated() && 
+      return isApproved() && 
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId == schoolId;
     }
     
     function isTeacher(schoolId) {
-      return isAuthenticated() && 
+      return isApproved() && 
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId == schoolId;
     }
     
     function isParent(schoolId) {
-      return isAuthenticated() && 
+      return isApproved() && 
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId == schoolId;
     }
@@ -87,6 +92,21 @@ service cloud.firestore {
       match /reports/{reportId} {
         allow read: if isAuthenticated() && (isAdmin(schoolId) || isTeacher(schoolId) || isParent(schoolId));
         allow write: if isAdmin(schoolId) || isTeacher(schoolId);
+      }
+      
+      match /fees/{feeId} {
+        allow read: if isAuthenticated() && (isAdmin(schoolId) || isTeacher(schoolId) || isParent(schoolId));
+        allow write: if isAdmin(schoolId);
+      }
+      
+      match /timetable/{timetableId} {
+        allow read: if isAuthenticated() && (isAdmin(schoolId) || isTeacher(schoolId) || isParent(schoolId));
+        allow write: if isAdmin(schoolId) || isTeacher(schoolId);
+      }
+      
+      match /transactions/{txnId} {
+        allow read: if isAuthenticated() && (isAdmin(schoolId) || isOwner(resource.data.studentId) || isParent(schoolId));
+        allow write: if isAdmin(schoolId);
       }
     }
   }

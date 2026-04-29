@@ -14,6 +14,7 @@ import { exportToExcel } from "@/lib/utils/importExport";
 import { useSchoolData, useCollection } from "@/lib/hooks/useSchoolData";
 import { doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
+import { SMS } from "@/lib/utils/sms";
 
 interface FeeRecord {
   id: string;
@@ -37,6 +38,10 @@ export default function AdminFeesPage() {
   const [recordPayment, setRecordPayment] = useState<FeeRecord | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
+  const [sendingReminders, setSendingReminders] = useState(false);
+
+  // We need students data to get parentContact
+  const { data: students } = useCollection<any>(schoolId, "students");
 
   // Live calculations
   const totalExpected = fees.reduce((sum, f) => sum + (f.termFee || 0), 0);
@@ -86,6 +91,30 @@ export default function AdminFeesPage() {
     setRecordPayment(null);
     setPaymentAmount("");
     setPaymentMethod("");
+  };
+
+  const handleSendFeeReminders = async () => {
+    setSendingReminders(true);
+    const unpaidFees = (fees as FeeRecord[]).filter(
+      f => f.status !== "paid"
+    );
+    for (const fee of unpaidFees) {
+      const student = (students as any[]).find(
+        s => s.id === fee.studentId
+      );
+      if (student?.parentContact) {
+        await SMS.feeReminder({
+          parentName:  student.parentName || "Parent",
+          parentPhone: student.parentContact,
+          studentName: student.name,
+          balance:     fee.balance,
+          schoolName:  schoolName || "EliteSchool's",
+        });
+        // Throttle — 1 SMS per second to respect API limits
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+    setSendingReminders(false);
   };
 
   const handleExportFees = () => {
@@ -260,6 +289,15 @@ export default function AdminFeesPage() {
                   download
                 </span>
                 Export
+              </EliteButton>
+              <EliteButton variant="outlined" size="sm"
+                loading={sendingReminders}
+                onClick={handleSendFeeReminders}>
+                <span className="material-symbols-outlined
+                                 text-[16px] mr-1.5">
+                  sms
+                </span>
+                Send Reminders
               </EliteButton>
             </div>
           </GlassCard>

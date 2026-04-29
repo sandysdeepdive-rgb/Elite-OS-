@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
@@ -14,6 +14,36 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  // Check for existing session on load
+  useEffect(() => {
+    const unsub = auth.onAuthStateChanged(async (user) => {
+      if (user) {
+        try {
+          const userDoc = await getDoc(doc(db, "users", user.uid));
+          if (userDoc.exists()) {
+            const profile = userDoc.data();
+            if (profile.status === "pending") {
+              router.push("/pending");
+              return;
+            }
+            const routes = {
+              admin:   "/admin/dashboard",
+              teacher: "/teacher/dashboard",
+              parent:  "/parent/dashboard",
+            };
+            router.push(routes[profile.role as keyof typeof routes] || "/");
+            return;
+          }
+        } catch (e) {
+          console.error("Session check failed", e);
+        }
+      }
+      setCheckingSession(false);
+    });
+    return () => unsub();
+  });
 
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
@@ -79,8 +109,7 @@ export default function LoginPage() {
       const profile = userDoc.data();
 
       if (profile.status === "pending") {
-        setError("Your account is pending approval.");
-        await auth.signOut();
+        router.push("/pending");
         return;
       }
 
@@ -124,6 +153,17 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  if (checkingSession) {
+    return (
+      <div className="mesh-gradient min-h-screen flex items-center justify-center font-body text-petrol">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-petrol/20 border-t-petrol rounded-full animate-spin"></div>
+          <p className="text-sm font-light tracking-widest uppercase">Checking Session</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mesh-gradient min-h-screen flex items-center justify-center p-6 font-body text-deep-charcoal relative overflow-hidden">

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase/config";
 import AdminSidebar from "@/components/layout/AdminSidebar";
 import TopAppBar from "@/components/layout/TopAppBar";
 import BottomNavBar, { ADMIN_NAV_ITEMS } from "@/components/layout/BottomNavBar";
@@ -12,6 +14,7 @@ import Badge from "@/components/ui/Badge";
 import CollectionErrorBanner from "@/components/ui/CollectionErrorBanner";
 import { exportToExcel } from "@/lib/utils/importExport";
 import { useSchoolData, useCollection } from "@/lib/hooks/useSchoolData";
+import { generateReportCardPDF } from "@/lib/utils/generateReportCard";
 
 const REPORT_TABS = [
   { label: "Overview", icon: "dashboard" },
@@ -22,14 +25,17 @@ const REPORT_TABS = [
 
 export default function AdminReportsPage() {
   const [activeTab, setActiveTab] = useState(0);
+  const [generating, setGenerating] = useState(false);
   const { schoolId, schoolName, adminName } = useSchoolData();
   
   const { data: students, error: studentsError } = useCollection<any>(schoolId, "students");
   const { data: teachers, error: teachersError } = useCollection<any>(schoolId, "teachers");
   const { data: classes, error: classesError }  = useCollection<any>(schoolId, "classes");
   const { data: fees, error: feesError }     = useCollection<any>(schoolId, "fees");
+  const { data: reports, error: reportsError } = useCollection<any>(schoolId, "reports");
+  const { data: attendance, error: attendanceError } = useCollection<any>(schoolId, "attendance");
 
-  const anyError = studentsError || teachersError || classesError || feesError;
+  const anyError = studentsError || teachersError || classesError || feesError || reportsError || attendanceError;
 
   const avgAttendance = students.length > 0
     ? Math.round(students.reduce((s, st) =>
@@ -59,6 +65,70 @@ export default function AdminReportsPage() {
     exportToExcel(reportData, "EliteSchoolOS_Overview_Report");
   };
 
+  const handleGenerateReportCards = async () => {
+    if (!schoolId) return;
+    setGenerating(true);
+  
+    // Get school settings
+    const schoolDoc = await getDoc(doc(db, "schools", schoolId));
+    const schoolData = schoolDoc.data();
+  
+    // Get all students
+    const today = new Date().toLocaleDateString("en-UG", {
+      day:"2-digit", month:"short", year:"numeric"
+    });
+  
+    for (const student of students) {
+      // Get this student's grades
+      const studentReports = reports.filter((r: any) =>
+        r.studentId === student.id
+      );
+  
+      // Get attendance
+      const studentAttendance = attendance
+        .filter((a: any) => a.studentId === student.id);
+      const presentCount = studentAttendance
+        .filter((a: any) => a.status === "present").length;
+      const absentCount  = studentAttendance
+        .filter((a: any) => a.status === "absent").length;
+      const lateCount    = studentAttendance
+        .filter((a: any) => a.status === "late").length;
+      const total = studentAttendance.length;
+      const pct = total > 0
+        ? Math.round((presentCount / total) * 100) : 0;
+  
+      generateReportCardPDF({
+        studentName:   student.name || student.firstName + " " + student.lastName,
+        studentId:     student.id,
+        class:         student.class || student.classId,
+        term:          schoolData?.currentTerm || "Term 2",
+        year:          schoolData?.academicYear || "2025",
+        schoolName:    schoolData?.name || "EliteSchool's",
+        schoolMotto:   schoolData?.motto,
+        grades:        studentReports.map((r: any) => ({
+          subject:     r.subject,
+          score:       r.score,
+          letterGrade: r.letterGrade,
+          remarks:     r.remarks,
+          teacherName: r.teacherName,
+        })),
+        attendance: {
+          present:    presentCount,
+          absent:     absentCount,
+          late:       lateCount,
+          percentage: pct,
+        },
+        classTeacher:  student.classTeacher,
+        generatedAt:   today,
+      });
+  
+      // Small delay between PDFs
+      await new Promise(r => setTimeout(r, 300));
+    }
+  
+    setGenerating(false);
+  };
+
   return (
     <div className="flex min-h-screen mesh-gradient-bg">
       <AdminSidebar
@@ -85,11 +155,15 @@ export default function AdminReportsPage() {
                 </span>
                 Export Excel
               </EliteButton>
-              <EliteButton variant="primary" size="sm">
-                <span className="material-symbols-outlined text-[16px] mr-1.5">
-                  print
+              <EliteButton
+                variant="primary" size="sm"
+                loading={generating}
+                onClick={handleGenerateReportCards}>
+                <span className="material-symbols-outlined
+                                 text-[16px] mr-1.5">
+                  picture_as_pdf
                 </span>
-                Print Reports
+                {generating ? "Generating..." : "Generate Report Cards"}
               </EliteButton>
             </div>
           </div>

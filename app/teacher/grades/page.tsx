@@ -25,6 +25,7 @@ import { useTeacherData } from "@/lib/hooks/useTeacherData";
 import { useTeacherStudents, useTeacherReports } from "@/lib/hooks/useSchoolData";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
+import { SMS } from "@/lib/utils/sms";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -618,6 +619,20 @@ export default function TeacherGradesPage() {
         { merge: true }
       );
       setSaveCount((prev) => prev + 1);
+
+      // Notify parents of graded students
+      const student = students.find(s => s.id === studentId);
+      if (student && (student as any).parentContact) {
+        await SMS.gradePosted({
+          parentName:  (student as any).parentName || "Parent",
+          parentPhone: (student as any).parentContact,
+          studentName: student.name,
+          subject:     teacherProfile.subject || "Subject",
+          score:       Number(score),
+          letterGrade: calculateLetterGrade(Number(score)),
+          schoolName:  teacherProfile?.schoolName || "EliteSchool's",
+        });
+      }
     } catch (error) {
       if (process.env.NODE_ENV === 'development') console.error("Error saving grade:", error);
       alert("Missing or insufficient permissions.");

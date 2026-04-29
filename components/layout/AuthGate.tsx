@@ -50,7 +50,7 @@ export default function AuthGate({
         const profile = userDoc.data() as UserProfile;
 
         if (profile.status === "pending") {
-          setStatus("pending");
+          router.push("/pending");
           return;
         }
 
@@ -88,38 +88,6 @@ export default function AuthGate({
                         text-outline">
             Verifying access...
           </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (status === "pending") {
-    return (
-      <div className="min-h-screen mesh-gradient-bg flex items-center
-                      justify-center px-6">
-        <div className="w-full max-w-sm text-center">
-          <div className="w-16 h-16 rounded-full bg-on-tertiary-container/20
-                          flex items-center justify-center mx-auto mb-6">
-            <span className="material-symbols-outlined text-[32px]
-                             text-on-tertiary-container">
-              schedule
-            </span>
-          </div>
-          <h2 className="font-headline text-3xl font-light italic
-                         text-primary mb-3">
-            Pending Approval
-          </h2>
-          <p className="font-body text-sm text-on-surface-variant
-                        font-light leading-relaxed mb-8">
-            Your account is awaiting administrator approval.
-            You will be notified once access is granted.
-          </p>
-          <button
-            onClick={() => { auth.signOut(); router.push("/"); }}
-            className="font-body text-sm text-outline hover:text-on-surface
-                       transition-colors">
-            Return to Login
-          </button>
         </div>
       </div>
     );

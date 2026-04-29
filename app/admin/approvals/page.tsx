@@ -11,6 +11,7 @@ import CollectionErrorBanner from "@/components/ui/CollectionErrorBanner";
 import { useSchoolData, useCollection } from "@/lib/hooks/useSchoolData";
 import { doc, updateDoc, deleteDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase/config";
+import { SMS } from "@/lib/utils/sms";
 
 interface Applicant {
   id: string;
@@ -74,6 +75,14 @@ export default function AdminApprovalsPage() {
       await deleteDoc(
         doc(db, "schools", schoolId, "pendingUsers", applicant.uid)
       );
+
+      // Send approval SMS if phone number available
+      if ((applicant as any).phone) {
+        await SMS.accountApproved({
+          phone:      (applicant as any).phone,
+          schoolName: schoolName || "EliteSchool's",
+        });
+      }
 
     } catch (err) {
       if (process.env.NODE_ENV === 'development') console.error("Approval error:", err);

@@ -103,12 +103,8 @@ export default function TeacherSignupPage() {
         handleFirestoreError(err, OperationType.WRITE, `users/${uid} or schools/${schoolIdDoc}/pendingUsers/${uid}`);
       }
 
-      // Step 5 — Sign out immediately
-      // Teacher cannot access app until approved
-      await auth.signOut();
-
-      // Step 6 — Show success message instead of routing
-      setSubmitted(true);
+      // Step 6 — Route to pending page (Keep them signed in so they see their status)
+      router.push("/pending");
 
     } catch (err: any) {
       const newAttempts = attempts + 1;

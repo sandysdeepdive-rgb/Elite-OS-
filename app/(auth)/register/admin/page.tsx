@@ -15,6 +15,7 @@ export default function AdminSignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [schoolName, setSchoolName] = useState("");
   const [schoolCode, setSchoolCode] = useState("");
   const [error, setError] = useState("");
@@ -219,17 +220,26 @@ export default function AdminSignupPage() {
 
               {/* Password Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="group">
+                <div className="group relative">
                   <label className="block font-label text-[10px] uppercase tracking-widest text-on-secondary-container mb-2 ml-4">
                     Password
                   </label>
                   <input
                     className="w-full h-14 px-6 bg-surface-container-low border-none rounded-full focus:ring-1 focus:ring-primary-container text-on-surface placeholder:text-on-secondary-container/40 transition-all"
                     placeholder="••••••••"
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-5 bottom-4 text-on-secondary-container/40 hover:text-primary transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-sm">
+                      {showPassword ? "visibility" : "visibility_off"}
+                    </span>
+                  </button>
                 </div>
                 <div className="group">
                   <label className="block font-label text-[10px] uppercase tracking-widest text-on-secondary-container mb-2 ml-4">
@@ -238,7 +248,7 @@ export default function AdminSignupPage() {
                   <input
                     className="w-full h-14 px-6 bg-surface-container-low border-none rounded-full focus:ring-1 focus:ring-primary-container text-on-surface placeholder:text-on-secondary-container/40 transition-all"
                     placeholder="••••••••"
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                   />

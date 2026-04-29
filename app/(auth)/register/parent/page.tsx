@@ -128,9 +128,8 @@ export default function ParentSignupPage() {
         { merge: true }
       );
 
-      // Step 7 — Sign out and show success
-      await auth.signOut();
-      setSubmitted(true);
+      // Step 7 — Route to pending page
+      router.push("/pending");
 
     } catch (err: any) {
       const newAttempts = attempts + 1;

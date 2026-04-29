@@ -9,6 +9,7 @@ import { useTeacherData } from "@/lib/hooks/useTeacherData";
 import { useCollection } from "@/lib/hooks/useSchoolData";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
+import { SMS } from "@/lib/utils/sms";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -229,6 +230,22 @@ export default function TeacherAttendancePage() {
         const localKey = `attendance_${activeClass}_${dateString}_${s.id}`;
         localStorage.removeItem(localKey);
       });
+
+      // Send SMS to parents of absent/late students
+      for (const student of students) {
+        if (student.status === "absent" || student.status === "late") {
+          const fullStudent = allStudents?.find(s => s.id === student.id);
+          if (fullStudent && (fullStudent as any).parentContact) {
+            await SMS.attendanceAlert({
+              parentName:  (fullStudent as any).parentName || "Parent",
+              parentPhone: (fullStudent as any).parentContact,
+              studentName: student.name,
+              status: student.status,
+              schoolName:  teacherProfile?.schoolName || "EliteSchool's",
+            });
+          }
+        }
+      }
 
       setSubmitted(true);
     } catch (error) {

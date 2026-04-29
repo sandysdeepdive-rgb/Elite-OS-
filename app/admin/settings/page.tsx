@@ -11,6 +11,7 @@ import EliteInput from "@/components/ui/EliteInput";
 import { useSchoolData } from "@/lib/hooks/useSchoolData";
 import { doc, getDoc, updateDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
+import { SMS } from "@/lib/utils/sms";
 
 // Mock Data
 const mockSchool = { name: "Elite Academy" };
@@ -21,6 +22,7 @@ const SETTINGS_TABS = [
   { label: "Term Settings", icon: "calendar_month" },
   { label: "Fee Structure", icon: "payments" },
   { label: "School Code", icon: "vpn_key" },
+  { label: "Notifications", icon: "sms" },
 ];
 
 const MOCK_FEE_STRUCTURE = [
@@ -44,6 +46,15 @@ export default function AdminSettingsPage() {
     endDate: "30 Jun 2025"
   });
 
+  const [smsPrefs, setSmsPrefs] = useState({
+    smsAttendance: true,
+    smsGrades: true,
+    smsFeeReminders: true,
+    smsApprovals: true,
+  });
+  const [testPhone, setTestPhone] = useState("");
+  const [testingSMS, setTestingSMS] = useState(false);
+
   useEffect(() => {
     if (!schoolId) return;
     const fetchSettings = async () => {
@@ -61,6 +72,9 @@ export default function AdminSettingsPage() {
         const data = settingsDoc.data();
         if (data.termSettings) {
           setTermForm(data.termSettings);
+        }
+        if (data.smsPrefs) {
+          setSmsPrefs(data.smsPrefs);
         }
       }
     };
@@ -103,6 +117,19 @@ export default function AdminSettingsPage() {
     } catch (error) {
       if (process.env.NODE_ENV === 'development') console.error("Error updating fee structure:", error);
       toast.error("Failed to update fee structure");
+    }
+  };
+
+  const handleSaveSmsPrefs = async () => {
+    if (!schoolId) return;
+    try {
+      await setDoc(doc(db, "schools", schoolId, "settings", "general"), {
+        smsPrefs
+      }, { merge: true });
+      toast.success("SMS settings updated successfully");
+    } catch (error) {
+      if (process.env.NODE_ENV === 'development') console.error("Error updating SMS settings:", error);
+      toast.error("Failed to update SMS settings");
     }
   };
 
@@ -472,6 +499,95 @@ export default function AdminSettingsPage() {
                 </EliteButton>
               </div>
             </GlassCard>
+          )}
+
+          {/* TAB 4 — Notifications */}
+          {activeTab === 4 && (
+            <div className="space-y-6">
+              <GlassCard>
+                <h3 className="font-headline text-xl font-light italic
+                               text-primary mb-5">
+                  SMS Notifications
+                </h3>
+                <div className="space-y-4">
+                  {[
+                    { key:"smsAttendance",
+                      label:"Attendance alerts",
+                      sub:"SMS parents when child is absent or late" },
+                    { key:"smsGrades",
+                      label:"Grade notifications",
+                      sub:"SMS parents when new grades are posted" },
+                    { key:"smsFeeReminders",
+                      label:"Fee reminders",
+                      sub:"Allow bulk fee reminder SMS to parents" },
+                    { key:"smsApprovals",
+                      label:"Account approvals",
+                      sub:"SMS users when their account is approved" },
+                  ].map(item => (
+                    <div key={item.key}
+                      className="flex items-center justify-between py-3
+                                 border-b border-outline-variant/20 last:border-0">
+                      <div>
+                        <p className="font-body text-sm text-on-surface font-light">
+                          {item.label}
+                        </p>
+                        <p className="font-body text-xs text-outline font-light mt-0.5">
+                          {item.sub}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setSmsPrefs(prev => ({
+                          ...prev,
+                          [item.key]: !prev[item.key as keyof typeof prev]
+                        }))}
+                        className={`w-12 h-6 rounded-full transition-all
+                                     duration-200 relative flex-shrink-0
+                                     ${smsPrefs[item.key as keyof typeof smsPrefs]
+                                       ? "bg-primary-container"
+                                       : "bg-surface-container-highest"}`}>
+                        <div className={`absolute top-1 w-4 h-4 rounded-full
+                                         bg-white shadow-sm transition-all duration-200
+                                         ${smsPrefs[item.key as keyof typeof smsPrefs]
+                                           ? "left-7" : "left-1"}`} />
+                      </button>
+                    </div>
+                  ))}
+                  <EliteButton variant="primary" fullWidth
+                    onClick={handleSaveSmsPrefs}>
+                    Save SMS Settings
+                  </EliteButton>
+                </div>
+              </GlassCard>
+
+              {/* Test SMS */}
+              <GlassCard padding="p-5">
+                <h3 className="font-headline text-xl font-light italic
+                               text-primary mb-4">
+                  Test SMS
+                </h3>
+                <div className="space-y-3">
+                  <EliteInput
+                    label="Test Phone Number"
+                    type="tel"
+                    placeholder="e.g. 0772123456"
+                    value={testPhone}
+                    onChange={e => setTestPhone(e.target.value)}
+                    hint="Enter a Uganda phone number to test" />
+                  <EliteButton variant="outlined" fullWidth
+                    loading={testingSMS}
+                    onClick={async () => {
+                      setTestingSMS(true);
+                      await SMS.custom({
+                        phones: [testPhone],
+                        message: `Test message from EliteSchool's OS. Your SMS notifications are working correctly.`,
+                      });
+                      setTestingSMS(false);
+                    }}>
+                    Send Test SMS
+                  </EliteButton>
+                </div>
+              </GlassCard>
+            </div>
           )}
         </main>
       </div>
