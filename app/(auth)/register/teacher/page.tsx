@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { createUserWithEmailAndPassword } from "firebase/auth";
+import { createUserWithEmailAndPassword, deleteUser } from "firebase/auth";
 import { doc, setDoc, collection, query, where, getDocs, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase/config";
+import { getAuthErrorMessage } from "@/lib/auth-errors";
 import { handleFirestoreError, OperationType } from "@/lib/firebase/errors";
 import { sanitizeText, sanitizeEmail } from "@/lib/utils/sanitize";
 
@@ -36,96 +37,60 @@ export default function TeacherSignupPage() {
       return;
     }
 
+    let userCredential;
     try {
-      // Step 1 — Validate school code exists
-      const schoolQuery = query(
-        collection(db, "schools"),
-        where("schoolCode", "==", schoolId.trim().toUpperCase())
-      );
-      
-      let schoolSnap;
-      try {
-        schoolSnap = await getDocs(schoolQuery);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.LIST, "schools");
-        return; // handleFirestoreError throws, but TS needs return
-      }
-
-      if (schoolSnap.empty) {
-        setError("Invalid school code. Contact your administrator.");
-        setLoading(false);
-        return;
-      }
-
-      const schoolDoc  = schoolSnap.docs[0];
-      const schoolIdDoc   = schoolDoc.id;
-      const schoolName = schoolDoc.data().name;
-
       // Step 2 — Create Firebase Auth account
-      const userCredential = await createUserWithEmailAndPassword(
+      userCredential = await createUserWithEmailAndPassword(
         auth, sanitizeEmail(email), password
       );
-      const uid = userCredential.user.uid;
-
-      try {
-        // Step 3 — Write user profile as pending
-        await setDoc(doc(db, "users", uid), {
-          name: sanitizeText(fullName),
-          email: sanitizeEmail(email),
-          role: "teacher",
-          schoolId: schoolIdDoc,
-          schoolName,
-          schoolCode: sanitizeText(schoolId.toUpperCase()),
-          linkedId: null,
-          status: "pending",
-          createdAt: serverTimestamp(),
-        });
-
-        // Step 4 — Write to pendingUsers subcollection
-        // so Admin Approvals page can see it
-        await setDoc(
-          doc(db, "schools", schoolIdDoc, "pendingUsers", uid),
-          {
-            uid,
-            name: sanitizeText(fullName),
-            email: sanitizeEmail(email),
-            role: "teacher",
-            schoolCode: sanitizeText(schoolId.toUpperCase()),
-            status: "pending",
-            registeredAt: new Date().toLocaleDateString("en-UG", {
-              day: "2-digit", month: "short",
-              year: "numeric", hour: "2-digit", minute: "2-digit",
-            }),
-            createdAt: serverTimestamp(),
-          }
-        );
-      } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, `users/${uid} or schools/${schoolIdDoc}/pendingUsers/${uid}`);
-      }
-
-      // Step 6 — Route to pending page (Keep them signed in so they see their status)
-      router.push("/pending");
-
-    } catch (err: any) {
+    } catch (authError: any) {
       const newAttempts = attempts + 1;
       localStorage.setItem('reg_attempts', newAttempts.toString());
       if (newAttempts >= 5) {
         localStorage.setItem('reg_timeout', (Date.now() + 15 * 60000).toString());
       }
+      setError(getAuthErrorMessage(authError.code));
+      setLoading(false);
+      return;
+    }
 
-      const code = err?.code;
-      if (code === "auth/email-already-in-use") {
-        setError("An account with this email already exists.");
-      } else if (code === "auth/weak-password") {
-        setError("Password must be at least 6 characters.");
-      } else if (code === "auth/operation-not-allowed") {
-        setError("Email/Password authentication is not enabled in Firebase.");
-      } else if (code === "permission-denied") {
-        setError("Database permission denied. Check Firestore rules.");
-      } else {
-        setError(err?.message || "Registration failed. Please try again.");
+    const uid = userCredential.user.uid;
+
+    try {
+      const { collection, query, where, getDocs, doc, setDoc } = await import("firebase/firestore");
+      
+      const schoolCodeUpper = schoolId.trim().toUpperCase();
+      const schoolsSnap = await getDocs(query(collection(db, "schools"), where("schoolCode", "==", schoolCodeUpper)));
+      
+      if (schoolsSnap.empty) {
+        await deleteUser(userCredential.user);
+        setError("Invalid school code");
+        setLoading(false);
+        return;
       }
-    } finally {
+      
+      const matchedSchoolId = schoolsSnap.docs[0].id;
+
+      await setDoc(doc(db, "users", uid), {
+        uid,
+        email: sanitizeEmail(email),
+        name: fullName,
+        role: "teacher",
+        schoolId: matchedSchoolId,
+        schoolCode: schoolCodeUpper,
+        status: "pending",
+        linkedId: null,
+        phone: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+
+      setSubmitted(true);
+      router.push("/pending-approval");
+
+    } catch (err: any) {
+      await deleteUser(userCredential.user);
+      setError('Network error. Please check your connection and try again.');
       setLoading(false);
     }
   };

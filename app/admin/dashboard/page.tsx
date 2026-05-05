@@ -11,6 +11,9 @@ import Badge from "@/components/ui/Badge";
 import AuthGate from "@/components/layout/AuthGate";
 import CollectionErrorBanner from "@/components/ui/CollectionErrorBanner";
 import { useSchoolData, useCollection } from "@/lib/hooks/useSchoolData";
+import { auth, db } from "@/lib/firebase/config";
+import { collection, query, where, getDocs, updateDoc, doc } from "firebase/firestore";
+import { toast } from "sonner";
 
 interface ActivityItem {
   id: string | number;
@@ -42,7 +45,7 @@ import ErrorBoundary from "@/components/ui/ErrorBoundary";
 
 export default function AdminDashboard() {
   const [dateString, setDateString] = useState("");
-  const { schoolId, schoolName, adminName } = useSchoolData();
+  const { schoolId, schoolName, adminName, authError, loading: schoolLoading } = useSchoolData();
   
   const { data: students, error: studentsError } = useCollection<any>(schoolId, "students");
   const { data: teachers, error: teachersError } = useCollection<any>(schoolId, "teachers");
@@ -74,6 +77,33 @@ export default function AdminDashboard() {
     }, 0);
   }, []);
 
+  // Task 4 — Self-healing check for missing schoolId
+  useEffect(() => {
+    const repairAccount = async () => {
+      if (auth.currentUser && !schoolId && !schoolLoading && !authError) {
+        try {
+          // Attempt to find a school where this user is the admin
+          const schoolsRef = collection(db, "schools");
+          const q = query(schoolsRef, where("adminUid", "==", auth.currentUser.uid));
+          const snap = await getDocs(q);
+          
+          if (!snap.empty) {
+            const foundSchoolId = snap.docs[0].id;
+            await updateDoc(doc(db, "users", auth.currentUser.uid), {
+              schoolId: foundSchoolId
+            });
+            toast.success("Account repaired: School connection restored.");
+            // Reload to pick up changes
+            window.location.reload();
+          }
+        } catch (err) {
+          console.warn("Self-healing failed:", err);
+        }
+      }
+    };
+    repairAccount();
+  }, [schoolId, schoolLoading, authError]);
+
   return (
     <ErrorBoundary>
       <AuthGate requiredRole="admin">
@@ -88,7 +118,17 @@ export default function AdminDashboard() {
             actions={<NotificationBell />}
           />
         <main className="flex-1 px-6 py-8 max-w-5xl mx-auto w-full space-y-8">
-          <CollectionErrorBanner error={anyError} />
+          <CollectionErrorBanner error={authError || anyError} />
+          
+          {authError === 'account_setup_incomplete' && (
+            <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl mb-6">
+              <p className="text-orange-800 text-sm">
+                <strong>Setup Warning:</strong> Your authentication was successful but your admin profile is missing or corrupted. 
+                Please contact support if this persists.
+              </p>
+            </div>
+          )}
+
           {/* Section 1: Greeting */}
           <section>
             <h1 className="font-headline text-4xl italic font-light text-primary">

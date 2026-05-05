@@ -9,6 +9,8 @@ export function useParentData() {
   const [parentProfile, setParentProfile] = useState<{
     uid: string;
     name: string;
+    email: string;
+    phone: string;
     schoolId: string;
     schoolName: string;
     linkedId: string;
@@ -65,6 +67,8 @@ export function useParentData() {
         setParentProfile({
           uid: user.uid,
           name: userData.name,
+          email: userData.email || user.email || "",
+          phone: userData.phone || "",
           schoolId,
           schoolName,
           linkedId: userData.linkedId || "",

@@ -64,21 +64,27 @@ function AIAssistantContent() {
     setHistory(newHistory);
 
     try {
-      const res = await fetch("/api/ai", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-secret": process.env.NEXT_PUBLIC_API_SECRET || "",
-        },
-        body: JSON.stringify({
-          message: userMessage,
-          context: buildContext(),
-          history: history.slice(-6),
-        }),
+      const { GoogleGenAI } = await import('@google/genai');
+      const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY });
+      const responseStream = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [
+          { role: 'user', parts: [{ text: buildContext() }] },
+          ...history.map(h => ({ role: h.role, parts: [{ text: h.content }] })),
+          { role: 'user', parts: [{ text: userMessage }] }
+        ],
+        config: {
+          systemInstruction: `You are an intelligent school management
+      assistant for EliteSchool's OS, a premium school management
+      system used in Uganda. You help school administrators understand
+      their school's performance data and make informed decisions.
+      Be concise, professional, and helpful. Use Ugandan context
+      where relevant (UGX currency, Uganda curriculum S.1-S.6,
+      Uganda grading system D1-F9).`,
+          temperature: 0.7,
+        }
       });
-      const data = await res.json();
-      const aiResponse = data.response ||
-        "I could not generate a response. Please try again.";
+      const aiResponse = responseStream.text() || "I could not generate a response. Please try again.";
       setResponse(aiResponse);
       setHistory([
         ...newHistory,

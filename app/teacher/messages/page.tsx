@@ -7,7 +7,7 @@ import { Search, Send, ChevronLeft, MessageSquare } from "lucide-react";
 import BottomNavBar, { TEACHER_NAV_ITEMS } from "@/components/layout/BottomNavBar";
 import CollectionErrorBanner from "@/components/ui/CollectionErrorBanner";
 import { useTeacherData } from "@/lib/hooks/useTeacherData";
-import { useCollection } from "@/lib/hooks/useSchoolData";
+import { useCollection, useChatCollection } from "@/lib/hooks/useSchoolData";
 import { collection, addDoc, serverTimestamp, doc, updateDoc, query, where, getDocs, getDoc } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase/config";
 
@@ -99,8 +99,9 @@ export default function TeacherMessagesPage() {
   const router = useRouter();
   const { teacherProfile } = useTeacherData();
   
-  const { data: chats, loading: chatsLoading, error: chatsError } = useCollection<Chat>(
-    teacherProfile?.schoolId || null, "chats"
+  const { data: chats, loading: chatsLoading, error: chatsError } = useChatCollection<Chat>(
+    teacherProfile?.schoolId || null,
+    teacherProfile?.uid || null
   );
 
   const [activeContactId, setActiveContactId] = useState<string | null>(null);
@@ -347,8 +348,8 @@ export default function TeacherMessagesPage() {
                       <div className="flex items-center justify-between gap-2 mt-0.5">
                         {/* Role badge */}
                         <span className="text-[9px] px-2 py-0.5 rounded-full uppercase tracking-widest"
-                          style={{ ...(ROLE_COLORS[contact.role] || ROLE_COLORS.parent), fontFamily: "'DM Mono', monospace" }}>
-                          {(ROLE_COLORS[contact.role] || ROLE_COLORS.parent).label}
+                          style={{ ...(ROLE_COLORS[contact.role as MessageRole] || ROLE_COLORS.parent), fontFamily: "'DM Mono', monospace" }}>
+                          {(ROLE_COLORS[contact.role as MessageRole] || ROLE_COLORS.parent).label}
                         </span>
                         {contact.unread > 0 && (
                           <span className="w-5 h-5 rounded-full bg-[#2B4D5A] text-white text-[10px] font-bold flex items-center justify-center" style={{ fontFamily: "'DM Sans', sans-serif" }}>

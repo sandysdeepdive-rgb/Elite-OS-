@@ -5,11 +5,13 @@ import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase/config";
 
+import { UserRole, UserStatus } from "@/lib/types";
+
 interface UserProfile {
-  role: "admin" | "teacher" | "parent";
+  role: UserRole;
   schoolId: string;
   name: string;
-  status: "active" | "pending";
+  status: UserStatus;
 }
 
 export default function AuthGate({
@@ -17,7 +19,7 @@ export default function AuthGate({
   requiredRole,
 }: {
   children: React.ReactNode;
-  requiredRole: "admin" | "teacher" | "parent";
+  requiredRole: UserRole;
 }) {
   const router = useRouter();
   const [status, setStatus] = useState<
@@ -41,28 +43,35 @@ export default function AuthGate({
 
       try {
         const userDoc = await getDoc(doc(db, "users", user.uid));
-
-        if (!userDoc.exists()) {
-          router.push("/");
-          return;
+        
+        let data: any = { valid: false, reason: "no_profile" };
+        if (userDoc.exists()) {
+          const u = userDoc.data();
+          if (u.status !== "approved") {
+            data = { valid: false, reason: "not_approved" };
+          } else if (u.role !== requiredRole) {
+            data = { valid: false, reason: "wrong_role", redirectRole: u.role };
+          } else {
+            data = { valid: true };
+          }
         }
 
-        const profile = userDoc.data() as UserProfile;
-
-        if (profile.status === "pending") {
-          router.push("/pending");
-          return;
+        if (data.valid) {
+          setStatus("authorized");
+        } else {
+          if (data.reason === "not_approved") {
+            setStatus("pending");
+            router.push("/pending-approval");
+          } else if (data.reason === "wrong_role" && data.redirectRole) {
+            setStatus("unauthorized");
+            router.push(`/${data.redirectRole}/dashboard`);
+          } else {
+            setStatus("unauthorized");
+            router.push("/");
+          }
         }
-
-        if (profile.role !== requiredRole) {
-          // Redirect to correct dashboard
-          router.push(`/${profile.role}/dashboard`);
-          return;
-        }
-
-        setStatus("authorized");
-      } catch {
-        router.push("/");
+      } catch (err) {
+        setStatus("unauthorized");
       }
     });
 

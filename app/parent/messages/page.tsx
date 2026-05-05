@@ -6,7 +6,9 @@ import { useRouter } from "next/navigation";
 import { Search, Send, ChevronLeft, MessageSquare } from "lucide-react";
 import BottomNavBar, { PARENT_NAV_ITEMS } from "@/components/layout/BottomNavBar";
 import { useParentData } from "@/lib/hooks/useParentData";
-import { useCollection } from "@/lib/hooks/useSchoolData";
+import { useChatCollection, useCollection } from "@/lib/hooks/useSchoolData";
+import { collection, addDoc, serverTimestamp, doc, updateDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase/config";
 
 // ─── Types & Mock Data ────────────────────────────────────────────────────────
 
@@ -100,17 +102,21 @@ export default function ParentMessagesPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   const { parentProfile } = useParentData();
-  const { data: chats } = useCollection<any>(
-    parentProfile?.schoolId || null, "chats"
+  const { data: chats } = useChatCollection<Contact>(
+    parentProfile?.schoolId || null, 
+    parentProfile?.uid || null
   );
 
-  // Filter chats involving this parent
-  const myChats = chats.filter(c =>
-    c.participants?.includes(parentProfile?.uid || "")
-  );
+  const myChats = chats;
+
+  const activeMessagesRaw = useCollection<any>(
+    activeContactId ? (parentProfile?.schoolId || null) : null,
+    activeContactId ? `chats/${activeContactId}/messages` : "none"
+  ).data;
+  
+  const activeMessages = [...activeMessagesRaw].reverse();
 
   const activeContact = myChats.find(c => c.id === activeContactId) ?? null;
-  const activeMessages = activeContactId ? (messages[activeContactId] ?? []) : [];
   const filteredContacts = myChats.filter(c =>
     c.name?.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -122,20 +128,34 @@ export default function ParentMessagesPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeContactId, messages, showConversation]);
 
-  function handleSend() {
-    if (!draft.trim() || !activeContactId) return;
-    const newMsg: Message = {
-      id: `m${Date.now()}`,
-      senderId: "me",
-      text: draft.trim(),
-      time: new Date().toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" }),
-      status: "sent",
-    };
-    setMessages(prev => ({
-      ...prev,
-      [activeContactId]: [...(prev[activeContactId] ?? []), newMsg],
-    }));
+  async function handleSend() {
+    if (!draft.trim() || !activeContactId || !parentProfile?.schoolId) return;
+    
+    const text = draft.trim();
     setDraft("");
+
+    const timeString = new Date().toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
+
+    // 1. Add message to subcollection
+    await addDoc(
+      collection(db, "schools", parentProfile.schoolId, "chats", activeContactId, "messages"),
+      {
+        senderId: parentProfile.uid,
+        text,
+        time: timeString,
+        createdAt: serverTimestamp(),
+      }
+    );
+
+    // 2. Update parent chat doc
+    await updateDoc(
+      doc(db, "schools", parentProfile.schoolId, "chats", activeContactId),
+      {
+        lastMessage: text,
+        time: timeString,
+        updatedAt: serverTimestamp(),
+      }
+    );
   }
 
   function handleSelectContact(id: string) {

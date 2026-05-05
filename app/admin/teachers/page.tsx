@@ -24,7 +24,7 @@ interface Teacher {
   subjects: string[];
   classes: string[];
   phone: string;
-  status: "active" | "pending";
+  status: "approved" | "pending";
 }
 
 export default function AdminTeachers() {
@@ -47,7 +47,7 @@ export default function AdminTeachers() {
     classes: "",
     phone: "",
     email: "",
-    status: "active" as "active" | "pending",
+    status: "approved" as "approved" | "pending",
   });
 
   const handleImportTeachers = async (rows: Record<string, unknown>[]) => {
@@ -67,7 +67,7 @@ export default function AdminTeachers() {
           classes: classesStr.split(",").map(c => sanitizeText(c)).filter(Boolean),
           phone: sanitizePhone(String(row.phone || "")),
           email: sanitizeEmail(String(row.email || "")),
-          status: sanitizeText(String(row.status || "active")),
+          status: sanitizeText(String(row.status || "approved")),
           code: sanitizeText(String(codeCounter).padStart(2, "0")),
           createdAt: serverTimestamp(),
         }
@@ -109,7 +109,7 @@ export default function AdminTeachers() {
       }
     );
     setShowAddModal(false);
-    setFormData({ name: "", code: "", subjects: [], classes: "", phone: "", email: "", status: "active" });
+    setFormData({ name: "", code: "", subjects: [], classes: "", phone: "", email: "", status: "approved" });
   };
 
   const handleEditTeacher = async () => {
@@ -122,7 +122,7 @@ export default function AdminTeachers() {
       }
     );
     setEditTeacher(null);
-    setFormData({ name: "", code: "", subjects: [], classes: "", phone: "", email: "", status: "active" });
+    setFormData({ name: "", code: "", subjects: [], classes: "", phone: "", email: "", status: "approved" });
   };
 
   const handleDeleteTeacher = async () => {
@@ -141,7 +141,7 @@ export default function AdminTeachers() {
       classes: (teacher.classes || []).join(", "),
       phone: teacher.phone || "",
       email: "", // Not in interface but in form
-      status: teacher.status || "active",
+      status: teacher.status || "approved",
     });
     setEditTeacher(teacher);
   };
@@ -171,7 +171,7 @@ export default function AdminTeachers() {
                 Import
               </EliteButton>
               <EliteButton variant="primary" onClick={() => {
-                setFormData({ name: "", code: "", subjects: [], classes: "", phone: "", email: "", status: "active" });
+                setFormData({ name: "", code: "", subjects: [], classes: "", phone: "", email: "", status: "approved" });
                 setShowAddModal(true);
               }}>
                 <span className="material-symbols-outlined text-[18px] mr-2">person_add</span>
@@ -210,7 +210,7 @@ export default function AdminTeachers() {
                 className="h-11 bg-surface-container-low rounded-full px-4 font-body text-sm font-light border-none focus:ring-2 focus:ring-primary-container focus:outline-none"
               >
                 <option value="">All Status</option>
-                <option value="active">Active</option>
+                <option value="approved">Approved</option>
                 <option value="pending">Pending</option>
               </select>
             </div>
@@ -280,7 +280,7 @@ export default function AdminTeachers() {
                 label: "Status",
                 width: "110px",
                 render: (v) => (
-                  <Badge variant={v as "active" | "pending"} dot>
+                  <Badge variant={v as "approved" | "pending"} dot>
                     {String(v).charAt(0).toUpperCase() + String(v).slice(1)}
                   </Badge>
                 ),
@@ -396,9 +396,9 @@ export default function AdminTeachers() {
                 <select 
                   className="w-full h-12 bg-surface-container-low rounded-xl px-4 font-body text-sm font-light border-none focus:ring-2 focus:ring-primary-container focus:outline-none" 
                   value={formData.status}
-                  onChange={(e) => setFormData({...formData, status: e.target.value as "active" | "pending"})}
+                  onChange={(e) => setFormData({...formData, status: e.target.value as "approved" | "pending"})}
                 >
-                  <option value="active">Active</option>
+                  <option value="approved">Approved</option>
                   <option value="pending">Pending</option>
                 </select>
               </div>

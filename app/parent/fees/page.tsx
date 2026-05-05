@@ -8,7 +8,8 @@ import CollectionErrorBanner from "@/components/ui/CollectionErrorBanner";
 import { useParentData } from "@/lib/hooks/useParentData";
 import { useChildCollection } from "@/lib/hooks/useSchoolData";
 import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "@/lib/firebase/config";
+import { db, auth } from "@/lib/firebase/config";
+import PayFeeButton from "@/components/PayFeeButton";
 import { Payments } from "@/lib/utils/payments";
 import { toast } from "sonner";
 
@@ -256,6 +257,21 @@ export default function ParentFeesPage() {
               )}
             </div>
           </div>
+
+          {/* Pesapal Pay Button */}
+          {childFee && (
+            <div className="flex justify-center">
+              <PayFeeButton
+                schoolId={parentProfile?.schoolId || ""}
+                feeId={childFee.id}
+                studentId={studentRecord?.id || ""}
+                studentName={studentRecord?.name || ""}
+                balance={childFee.balance}
+                payerEmail={auth.currentUser?.email || parentProfile?.email || ""}
+                payerPhone={parentProfile?.phone || ""}
+              />
+            </div>
+          )}
 
           {/* Section 3 — Fee breakdown table */}
           <div>

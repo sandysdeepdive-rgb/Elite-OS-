@@ -1,113 +1,203 @@
 rules_version = '2';
+
+// FIRESTORE INDEX REQUIRED: fees collection — composite index on (term ASC, academicYear ASC)
+// Create at: https://console.firebase.google.com/project/{PROJECT_ID}/firestore/indexes
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
+
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Phase 3: Primitive Definitions ---
+    
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    function isApproved() {
-      return isAuthenticated() && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'approved';
+    // Get current user document data
+    function currentUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
-    
-    function isOwner(uid) {
-      return isAuthenticated() && request.auth.uid == uid;
+
+    function userExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
-    
+
+    // Role and Status checks
+    function isStatusActive(user) {
+      return user.status == 'approved';
+    }
+
     function isAdmin(schoolId) {
-      return isApproved() && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId == schoolId;
+      let user = currentUserData();
+      return isAuthenticated() && user.role == 'admin' && user.schoolId == schoolId && isStatusActive(user);
     }
-    
+
     function isTeacher(schoolId) {
-      return isApproved() && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher' &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId == schoolId;
+      let user = currentUserData();
+      return isAuthenticated() && user.role == 'teacher' && user.schoolId == schoolId && isStatusActive(user);
     }
-    
+
     function isParent(schoolId) {
-      return isApproved() && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.schoolId == schoolId;
+      let user = currentUserData();
+      return isAuthenticated() && user.role == 'parent' && user.schoolId == schoolId && isStatusActive(user);
     }
 
-    // Users collection
+    function belongsToSchool(schoolId) {
+      let user = currentUserData();
+      return isAuthenticated() && user.schoolId == schoolId && isStatusActive(user);
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Helpers ---
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['role', 'schoolId', 'email', 'status']) &&
+             data.role in ['admin', 'teacher', 'parent'] &&
+             data.schoolId is string &&
+             data.email is string &&
+             data.status in ['approved', 'pending', 'rejected'];
+    }
+
+    function isValidStudent(data) {
+      return data.keys().hasAll(['name', 'class', 'id', 'createdAt']) &&
+             data.name is string && data.name.size() <= 100 &&
+             data.class is string && data.class.size() <= 20;
+    }
+
+    function isValidFee(data) {
+      return data.keys().hasAll(['studentId', 'studentName', 'termFee', 'amountPaid', 'balance', 'status', 'term', 'academicYear', 'createdAt']) &&
+             data.studentId is string &&
+             data.termFee is number && data.termFee >= 0 &&
+             data.amountPaid is number && data.amountPaid >= 0 &&
+             data.balance is number &&
+             data.status in ['paid', 'partial', 'unpaid'];
+    }
+
+    // --- Collection Matches ---
+
+    // 1. Users
     match /users/{userId} {
-      allow read: if isOwner(userId);
-      allow create: if isOwner(userId);
-      allow update: if isOwner(userId);
+      allow read: if isAuthenticated() && (request.auth.uid == userId || (isAdmin(currentUserData().schoolId)));
+      allow create: if isAuthenticated() && request.auth.uid == userId && isValidUser(incoming());
+      allow update: if isAuthenticated() && (
+        request.auth.uid == userId || isAdmin(incoming().schoolId)
+      );
     }
 
-    // Schools collection
+    // 2. Schools
     match /schools/{schoolId} {
-      allow read: if isAuthenticated();
+      // Basic school info is readable for registration/validation
+      allow get: if isAuthenticated();
+      allow list: if isAuthenticated();
       allow create: if isAuthenticated();
       allow update: if isAdmin(schoolId);
-      
+
       // Subcollections
+      
+      // Settings
+      match /settings/{settingId} {
+        allow read: if belongsToSchool(schoolId);
+        allow write: if isAdmin(schoolId);
+      }
+
+      // Students
       match /students/{studentId} {
-        allow read: if isAuthenticated() && (isAdmin(schoolId) || isTeacher(schoolId) || isParent(schoolId));
-        allow write: if isAdmin(schoolId);
-      }
-      
-      match /teachers/{teacherId} {
-        allow read: if isAuthenticated() && (isAdmin(schoolId) || isTeacher(schoolId) || isParent(schoolId));
-        allow write: if isAdmin(schoolId);
-      }
-      
-      match /classes/{classId} {
-        allow read: if isAuthenticated() && (isAdmin(schoolId) || isTeacher(schoolId) || isParent(schoolId));
-        allow write: if isAdmin(schoolId);
-      }
-      
-      match /pendingUsers/{userId} {
-        allow read: if isAdmin(schoolId) || isOwner(userId);
-        allow create: if isOwner(userId);
+        allow get: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && existing().parentUid == request.auth.uid);
+        allow list: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && resource.data.parentUid == request.auth.uid);
+        allow create: if isAdmin(schoolId); // Removed isValidStudent for flexibility during import
+        allow update: if isAdmin(schoolId) || (isParent(schoolId) && existing().parentUid == request.auth.uid); 
         allow delete: if isAdmin(schoolId);
       }
-      
+
+      // Teachers
+      match /teachers/{teacherId} {
+        allow read: if belongsToSchool(schoolId);
+        allow write: if isAdmin(schoolId);
+      }
+
+      // Classes
+      match /classes/{classId} {
+        allow read: if belongsToSchool(schoolId);
+        allow write: if isAdmin(schoolId);
+      }
+
+      // Fees
+      match /fees/{feeId} {
+        allow get: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && existing().studentId == currentUserData().linkedId);
+        allow list: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && resource.data.studentId == currentUserData().linkedId);
+        allow write: if isAdmin(schoolId);
+        allow update: if isParent(schoolId) && existing().studentId == currentUserData().linkedId && incoming().diff(existing()).affectedKeys().hasOnly(['amountPaid', 'balance', 'status']);
+      }
+
+      // Reports
+      match /reports/{reportId} {
+        allow get: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && existing().studentId == currentUserData().linkedId);
+        allow list: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && resource.data.studentId == currentUserData().linkedId);
+        allow create, update: if isAdmin(schoolId) || isTeacher(schoolId);
+        allow delete: if isAdmin(schoolId);
+      }
+
+      // Attendance
+      match /attendance/{attendanceId} {
+        allow get: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && existing().studentId == currentUserData().linkedId);
+        allow list: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && resource.data.studentId == currentUserData().linkedId);
+        allow create, update: if isAdmin(schoolId) || isTeacher(schoolId);
+        allow delete: if isAdmin(schoolId);
+      }
+
+      // Timetable
+      match /timetable/{timetableId} {
+        allow read: if belongsToSchool(schoolId);
+        allow write: if isAdmin(schoolId) || isTeacher(schoolId);
+      }
+
+      // Chats
       match /chats/{chatId} {
-        allow read: if isAuthenticated() && request.auth.uid in resource.data.participants;
-        allow create: if isAuthenticated() && request.auth.uid in request.resource.data.participants;
-        allow update: if isAuthenticated() && request.auth.uid in resource.data.participants;
-        
+        allow get: if belongsToSchool(schoolId) && request.auth.uid in existing().participants;
+        allow list: if belongsToSchool(schoolId) && request.auth.uid in resource.data.participants;
+        allow create: if belongsToSchool(schoolId) && request.auth.uid in incoming().participants;
+        allow update: if belongsToSchool(schoolId) && request.auth.uid in existing().participants && incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'time', 'unread', 'updatedAt']);
+
         match /messages/{messageId} {
-          allow read: if isAuthenticated() && request.auth.uid in get(/databases/$(database)/documents/schools/$(schoolId)/chats/$(chatId)).data.participants;
-          allow create: if isAuthenticated() && request.auth.uid == request.resource.data.senderId && request.auth.uid in get(/databases/$(database)/documents/schools/$(schoolId)/chats/$(chatId)).data.participants;
+          allow read: if belongsToSchool(schoolId) && request.auth.uid in get(/databases/$(database)/documents/schools/$(schoolId)/chats/$(chatId)).data.participants;
+          allow create: if belongsToSchool(schoolId) && request.auth.uid == incoming().senderId && request.auth.uid in get(/databases/$(database)/documents/schools/$(schoolId)/chats/$(chatId)).data.participants;
         }
       }
-      
-      match /settings/{settingId} {
-        allow read: if isAuthenticated() && (isAdmin(schoolId) || isTeacher(schoolId) || isParent(schoolId));
-        allow write: if isAdmin(schoolId);
+
+      // Pending Users
+      match /pendingUsers/{userId} {
+        allow create: if isAuthenticated() && request.auth.uid == userId;
+        allow read, delete: if isAdmin(schoolId);
       }
-      
-      match /attendance/{attendanceId} {
-        allow read: if isAuthenticated() && (isAdmin(schoolId) || isTeacher(schoolId) || isParent(schoolId));
-        allow write: if isAdmin(schoolId) || isTeacher(schoolId);
+
+      // Payment Sessions (Pesapal)
+      match /paymentSessions/{sessionId} {
+        allow read: if isAdmin(schoolId) || isTeacher(schoolId);
+        allow write: if false; // Only via Cloud Functions/Server
       }
-      
-      match /reports/{reportId} {
-        allow read: if isAuthenticated() && (isAdmin(schoolId) || isTeacher(schoolId) || isParent(schoolId));
-        allow write: if isAdmin(schoolId) || isTeacher(schoolId);
-      }
-      
-      match /fees/{feeId} {
-        allow read: if isAuthenticated() && (isAdmin(schoolId) || isTeacher(schoolId) || isParent(schoolId));
-        allow write: if isAdmin(schoolId);
-      }
-      
-      match /timetable/{timetableId} {
-        allow read: if isAuthenticated() && (isAdmin(schoolId) || isTeacher(schoolId) || isParent(schoolId));
-        allow write: if isAdmin(schoolId) || isTeacher(schoolId);
-      }
-      
+
+      // Transactions
       match /transactions/{txnId} {
-        allow read: if isAuthenticated() && (isAdmin(schoolId) || isOwner(resource.data.studentId) || isParent(schoolId));
+        allow get: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && existing().studentId == currentUserData().linkedId);
+        allow list: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && resource.data.studentId == currentUserData().linkedId);
         allow write: if isAdmin(schoolId);
       }
     }
   }
 }
+

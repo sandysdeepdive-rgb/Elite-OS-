@@ -11,17 +11,36 @@ export function useSchoolData() {
   const [schoolId, setSchoolId] = useState<string | null>(null);
   const [schoolName, setSchoolName] = useState("EliteSchool's");
   const [adminName, setAdminName] = useState("Administrator");
+  const [adminEmail, setAdminEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) { setLoading(false); return; }
+      if (!user) { 
+        setLoading(false); 
+        return; 
+      }
+      setAdminEmail(user.email);
       try {
         const userDoc = await getDoc(doc(db, "users", user.uid));
         if (userDoc.exists()) {
           const data = userDoc.data();
           setSchoolId(data.schoolId);
           setAdminName(data.name);
+          
+          // Normalized role and status check
+          const role = (data.role || "").toLowerCase().trim();
+          const status = (data.status || "").toLowerCase().trim();
+
+          if (role !== "admin") {
+            setAuthError("access_denied");
+          }
+
+          if (status !== "approved") {
+            setAuthError("access_denied");
+          }
+
           try {
             const schoolDoc = await getDoc(
               doc(db, "schools", data.schoolId)
@@ -32,8 +51,13 @@ export function useSchoolData() {
           } catch (e) {
             console.warn("Could not fetch school doc:", e);
           }
+        } else {
+          setAuthError("account_setup_incomplete");
         }
-      } catch (error) {
+      } catch (error: any) {
+        if (error.message?.includes("permissions")) {
+          setAuthError("permission_denied");
+        }
         handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
       } finally {
         setLoading(false);
@@ -42,7 +66,7 @@ export function useSchoolData() {
     return () => unsub();
   }, []);
 
-  return { schoolId, schoolName, adminName, loading };
+  return { schoolId, schoolName, adminName, adminEmail, loading, authError };
 }
 
 export function useCollection<T>(
@@ -82,9 +106,9 @@ export function useCollection<T>(
         setError(null);
       },
       (err) => {
-        console.warn(
-          `[${collectionName}] snapshot error:`, err.message
-        );
+        // console.warn(
+        //   `[${collectionName}] snapshot error:`, err.message
+        // );
 
         if (err.message.includes("index")) {
           setError("index_required");
@@ -267,6 +291,65 @@ export function useTeacherReports<T>(
 
   return { data, loading, error };
 }
+export function useChatCollection<T = any>(
+  schoolId: string | null,
+  userId: string | null
+) {
+  const [data, setData] = useState<T[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!schoolId || !userId) {
+      setTimeout(() => setLoading(false), 0);
+      return;
+    }
+
+    const q = query(
+      collection(db, "schools", schoolId, "chats"),
+      where("participants", "array-contains", userId),
+      orderBy("updatedAt", "desc")
+    );
+
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setData(snap.docs.map(d => ({
+          id: d.id, ...d.data()
+        })) as T[]);
+        setLoading(false);
+        setError(null);
+      },
+      (err) => {
+        console.warn(`[chats] snapshot error:`, err.message);
+        if (err.message.includes("index")) {
+          setError("index_required");
+        } else if (err.message.includes("permissions") || err.message.includes("insufficient")) {
+          setError("permission_denied");
+        } else {
+          setError("unknown");
+        }
+
+        // Try without orderBy if permission/index issue
+        const fallbackQ = query(
+          collection(db, "schools", schoolId, "chats"),
+          where("participants", "array-contains", userId)
+        );
+        onSnapshot(fallbackQ, (s) => {
+           setData(s.docs.map(d => ({ id: d.id, ...d.data() })) as T[]);
+           setLoading(false);
+        }, () => {
+           setData([]);
+           setLoading(false);
+        });
+      }
+    );
+    return () => unsub();
+  }, [schoolId, userId]);
+
+  return { data, loading, error };
+}
+
 export function useChildCollection<T>(
   schoolId: string | null,
   collectionName: string,

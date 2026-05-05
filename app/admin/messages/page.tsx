@@ -8,7 +8,7 @@ import GlassCard from "@/components/ui/GlassCard";
 import EliteInput from "@/components/ui/EliteInput";
 import EliteButton from "@/components/ui/EliteButton";
 import CollectionErrorBanner from "@/components/ui/CollectionErrorBanner";
-import { useSchoolData, useCollection } from "@/lib/hooks/useSchoolData";
+import { useSchoolData, useCollection, useChatCollection } from "@/lib/hooks/useSchoolData";
 import { collection, addDoc, serverTimestamp, doc, updateDoc, query, where, getDocs } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase/config";
 
@@ -32,7 +32,7 @@ interface Message {
 
 export default function AdminMessagesPage() {
   const { schoolId, schoolName, adminName } = useSchoolData();
-  const { data: chats, loading: chatsLoading, error: chatsError } = useCollection<Chat>(schoolId, "chats");
+  const { data: chats, loading: chatsLoading, error: chatsError } = useChatCollection<Chat>(schoolId, auth.currentUser?.uid || null);
   
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");

@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { createUserWithEmailAndPassword } from "firebase/auth";
+import { createUserWithEmailAndPassword, deleteUser } from "firebase/auth";
 import { doc, setDoc, collection, query, where, getDocs, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase/config";
+import { getAuthErrorMessage } from "@/lib/auth-errors";
 import { sanitizeText, sanitizeEmail } from "@/lib/utils/sanitize";
 
 export default function ParentSignupPage() {
@@ -36,121 +37,66 @@ export default function ParentSignupPage() {
       return;
     }
 
+    let userCredential;
     try {
-      // Step 1 — Validate school code
-      const schoolQuery = query(
-        collection(db, "schools"),
-        where("schoolCode", "==", schoolId.trim().toUpperCase())
-      );
-      const schoolSnap = await getDocs(schoolQuery);
-
-      if (schoolSnap.empty) {
-        setError("Invalid school code. Contact your school.");
-        setLoading(false);
-        return;
-      }
-
-      const schoolDoc = schoolSnap.docs[0];
-      const schoolIdDoc  = schoolDoc.id;
-
-      // Step 2 — Validate student ID exists using server-side API
-      const verifyRes = await fetch('/api/verify-student', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          schoolId: schoolIdDoc,
-          studentId: studentId.trim().toUpperCase(),
-        }),
-      });
-
-      const verifyData = await verifyRes.json();
-
-      if (!verifyRes.ok) {
-        setError(verifyData.error || "Student ID not found. Check with your school administrator.");
-        setLoading(false);
-        return;
-      }
-
-      const studentData = verifyData.student;
-
-      // Check if parent already linked
-      if (studentData.parentUid) {
-        setError("A parent account is already linked to this student.");
-        setLoading(false);
-        return;
-      }
-
       // Step 3 — Create Firebase Auth account
-      const userCredential = await createUserWithEmailAndPassword(
+      userCredential = await createUserWithEmailAndPassword(
         auth, sanitizeEmail(email), password
       );
-      const uid = userCredential.user.uid;
-
-      // Step 4 — Write user profile
-      await setDoc(doc(db, "users", uid), {
-        name: sanitizeText(fullName),
-        email: sanitizeEmail(email),
-        role: "parent",
-        schoolId: schoolIdDoc,
-        linkedId: studentData.id,
-        studentId: sanitizeText(studentId.toUpperCase()),
-        studentName: studentData.name,
-        status: "pending",
-        createdAt: serverTimestamp(),
-      });
-
-      // Step 5 — Write to pendingUsers
-      await setDoc(
-        doc(db, "schools", schoolIdDoc, "pendingUsers", uid),
-        {
-          uid,
-          name: sanitizeText(fullName),
-          email: sanitizeEmail(email),
-          role: "parent",
-          schoolCode: sanitizeText(schoolId.toUpperCase()),
-          studentId: sanitizeText(studentId.toUpperCase()),
-          studentName: studentData.name,
-          status: "pending",
-          registeredAt: new Date().toLocaleDateString("en-UG", {
-            day: "2-digit", month: "short",
-            year: "numeric", hour: "2-digit", minute: "2-digit",
-          }),
-          createdAt: serverTimestamp(),
-        }
-      );
-
-      // Step 6 — Update student document with parentUid
-      await setDoc(
-        doc(db, "schools", schoolIdDoc, "students", studentData.id),
-        { parentUid: uid, parentName: sanitizeText(fullName) },
-        { merge: true }
-      );
-
-      // Step 7 — Route to pending page
-      router.push("/pending");
-
-    } catch (err: any) {
+    } catch (authError: any) {
       const newAttempts = attempts + 1;
       localStorage.setItem('reg_attempts', newAttempts.toString());
       if (newAttempts >= 5) {
         localStorage.setItem('reg_timeout', (Date.now() + 15 * 60000).toString());
       }
+      setError(getAuthErrorMessage(authError.code));
+      setLoading(false);
+      return;
+    }
 
-      const code = err?.code;
-      if (code === "auth/email-already-in-use") {
-        setError("An account with this email already exists.");
-      } else if (code === "auth/weak-password") {
-        setError("Password must be at least 6 characters.");
-      } else if (code === "auth/operation-not-allowed") {
-        setError("Email/Password authentication is not enabled in Firebase.");
-      } else if (code === "permission-denied") {
-        setError("Database permission denied. Check Firestore rules.");
-      } else {
-        setError(err?.message || "Registration failed. Please try again.");
+    const uid = userCredential.user.uid;
+
+    try {
+      const { collection, query, where, getDocs, doc, setDoc } = await import("firebase/firestore");
+      
+      const schoolCodeUpper = schoolId.trim().toUpperCase();
+      const schoolsSnap = await getDocs(query(collection(db, "schools"), where("schoolCode", "==", schoolCodeUpper)));
+      
+      if (schoolsSnap.empty) {
+        await deleteUser(userCredential.user);
+        setError("Invalid school code");
+        setLoading(false);
+        return;
       }
-    } finally {
+      
+      const matchedSchoolId = schoolsSnap.docs[0].id;
+
+      // Verify student ID
+      const studentIdUpper = studentId.trim().toUpperCase();
+      const studentSnap = await getDocs(query(collection(db, "schools", matchedSchoolId, "students"), where("id", "==", studentIdUpper)));
+      
+      const linkedStudentId = studentSnap.empty ? studentIdUpper : studentSnap.docs[0].id;
+
+      await setDoc(doc(db, "users", uid), {
+        uid,
+        email: sanitizeEmail(email),
+        name: fullName,
+        role: "parent",
+        schoolId: matchedSchoolId,
+        schoolCode: schoolCodeUpper,
+        status: "pending",
+        linkedId: linkedStudentId,
+        phone: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+
+      setSubmitted(true);
+      router.push("/pending-approval");
+
+    } catch (err: any) {
+      await deleteUser(userCredential.user);
+      setError('Network error. Please check your connection and try again.');
       setLoading(false);
     }
   };

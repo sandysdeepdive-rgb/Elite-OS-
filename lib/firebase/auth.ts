@@ -37,7 +37,7 @@ export async function signUpAdmin(
     role: "admin",
     schoolId: uid,
     linkedId: null,
-    status: "active",
+    status: "approved",
     createdAt: serverTimestamp(),
   });
 

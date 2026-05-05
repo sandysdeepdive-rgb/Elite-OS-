@@ -12,27 +12,45 @@ export enum OperationType {
 export interface FirestoreErrorInfo {
   error: string;
   operationType: OperationType | string;
-  path: string;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
 }
 
 export function handleFirestoreError(
-  err: unknown,
+  error: unknown,
   operationType: OperationType | string,
-  path: string
-): void {
-  const message = err instanceof Error
-    ? err.message : String(err);
-
-  // Log for debugging — never throw to UI
-  console.warn(`[Firestore ${operationType}] ${path}:`, message);
-
-  // Only throw for non-index, non-permission errors
-  // Index errors and permission errors are handled
-  // gracefully by returning empty data
-  if (message.includes("index") ||
-      message.includes("permissions") ||
-      message.includes("insufficient")) {
-    console.warn("Handled gracefully — returning empty data");
-    return;
+  path: string | null
+): never {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
   }
+  
+  const json = JSON.stringify(errInfo);
+  console.error('Firestore Error:', json);
+  
+  // Re-throw as JSON string so the system can parse it
+  throw new Error(json);
 }

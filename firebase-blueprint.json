@@ -1,0 +1,31 @@
+{
+  "entities": {
+    "PaymentSession": {
+      "title": "Payment Session",
+      "description": "A payment session initiated via Pesapal",
+      "type": "object",
+      "properties": {
+        "feeId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "completed", "failed"] },
+        "orderTrackingId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "error": { "type": "string" }
+      },
+      "required": ["feeId", "studentId", "amount", "status", "orderTrackingId", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/schools/{schoolId}/paymentSessions/{sessionId}": {
+      "schema": "PaymentSession",
+      "description": "Pesapal payment sessions for a school"
+    },
+    "/schools/{schoolId}/fees/{feeId}": {
+      "schema": "FeeRecord",
+      "description": "Fee records for students"
+    }
+  }
+}

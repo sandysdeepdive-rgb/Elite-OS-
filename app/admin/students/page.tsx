@@ -13,9 +13,11 @@ import CollectionErrorBanner from "@/components/ui/CollectionErrorBanner";
 import ImportModal from "@/components/ui/ImportModal";
 import { downloadStudentTemplate } from "@/lib/utils/importExport";
 import { useSchoolData, useCollection } from "@/lib/hooks/useSchoolData";
-import { collection, addDoc, serverTimestamp, updateDoc, deleteDoc, doc } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, updateDoc, deleteDoc, doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 import { sanitizeText, sanitizePhone } from "@/lib/utils/sanitize";
+import { getTermFee, DEFAULT_FEE_STRUCTURE, FeeStructure } from "@/lib/fees";
+import { toast } from "sonner";
 
 interface Student {
   id: string;
@@ -49,24 +51,105 @@ export default function AdminStudents() {
 
   const handleImportStudents = async (rows: Record<string, unknown>[]) => {
     if (!schoolId) return;
-    for (const row of rows) {
-      if (!row.name) continue; // skip empty rows
-      await addDoc(
-        collection(db, "schools", schoolId, "students"),
-        {
-          name: sanitizeText(String(row.name || "")),
-          class: sanitizeText(String(row.class || "")),
-          parentContact: sanitizePhone(String(row.parentPhone || "")),
-          parentName: sanitizeText(String(row.parentName || "")),
-          dateOfBirth: sanitizeText(String(row.dateOfBirth || "")),
-          gender: sanitizeText(String(row.gender || "")),
-          feesStatus: sanitizeText(String(row.feesStatus || "unpaid")),
-          attendance: "0%",
-          id: `ST-${Date.now().toString().slice(-4)}-${Math.random()
-            .toString(36).substr(2,3).toUpperCase()}`,
-          createdAt: serverTimestamp(),
+
+    // Fetch settings for fee calculation
+    let term = "Term 1";
+    let year = new Date().getFullYear().toString();
+    let feeStructure = DEFAULT_FEE_STRUCTURE;
+
+    try {
+      const settingsDoc = await getDoc(doc(db, "schools", schoolId, "settings", "general"));
+      if (settingsDoc.exists()) {
+        const data = settingsDoc.data();
+        if (data.termSettings) {
+          term = data.termSettings.currentTerm || term;
+          year = data.termSettings.academicYear || year;
         }
-      );
+        if (data.feeStructure) {
+          // Normalize array from settings to object needed by getTermFee if necessary
+          // But our lib/fees.ts expects an object with specific keys.
+          // Based on settings/page.tsx, it might be an array.
+          if (Array.isArray(data.feeStructure)) {
+            feeStructure = {
+              senior1_2: data.feeStructure.find((t: any) => t.level.includes("1 & 2"))?.amount || DEFAULT_FEE_STRUCTURE.senior1_2,
+              senior3_4: data.feeStructure.find((t: any) => t.level.includes("3 & 4"))?.amount || DEFAULT_FEE_STRUCTURE.senior3_4,
+              senior5_6: data.feeStructure.find((t: any) => t.level.includes("5 & 6"))?.amount || DEFAULT_FEE_STRUCTURE.senior5_6,
+            };
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching settings:", err);
+    }
+
+    const total = rows.filter(r => r.name).length;
+    let count = 0;
+    let failedFees = 0;
+
+    // Process in batches of 10
+    const chunks = [];
+    const filteredRows = rows.filter(r => r.name);
+    for (let i = 0; i < filteredRows.length; i += 10) {
+      chunks.push(filteredRows.slice(i, i + 10));
+    }
+
+    for (const chunk of chunks) {
+      await Promise.all(chunk.map(async (row) => {
+        try {
+          const studentRef = await addDoc(
+            collection(db, "schools", schoolId, "students"),
+            {
+              name: sanitizeText(String(row.name || "")),
+              class: sanitizeText(String(row.class || "")),
+              parentContact: sanitizePhone(String(row.parentPhone || "")),
+              parentName: sanitizeText(String(row.parentName || "")),
+              dateOfBirth: sanitizeText(String(row.dateOfBirth || "")),
+              gender: sanitizeText(String(row.gender || "")),
+              feesStatus: "unpaid",
+              attendance: "0%",
+              id: `ST-${Date.now().toString().slice(-4)}-${Math.random()
+                .toString(36).substr(2,3).toUpperCase()}`,
+              createdAt: serverTimestamp(),
+            }
+          );
+
+          // Create Fee Record
+          try {
+            const studentClass = String(row.class || "S.1");
+            const termFee = getTermFee(studentClass, feeStructure);
+            const feeId = crypto.randomUUID();
+            
+            await setDoc(doc(db, "schools", schoolId, "fees", feeId), {
+              studentId: studentRef.id,
+              studentName: String(row.name || ""),
+              class: studentClass,
+              termFee: termFee,
+              amountPaid: 0,
+              balance: termFee,
+              status: "unpaid",
+              term: term,
+              academicYear: year,
+              createdAt: serverTimestamp()
+            });
+          } catch (feeErr) {
+            console.error("Fee creation failed for imported student:", feeErr);
+            failedFees++;
+          }
+          
+          count++;
+        } catch (err) {
+          console.error("Import error:", err);
+        }
+      }));
+      
+      // Update progress if possible (though we don't have a specific state for it in this simple modal setup, 
+      // we can use a toast or just wait)
+    }
+
+    if (failedFees > 0) {
+      toast.warning(`${count} students imported. ${failedFees} fee records could not be created. Go to Fee Initialisation to resolve.`);
+    } else {
+      toast.success(`Import complete — ${count} students added with fee records.`);
     }
   };
 
@@ -89,20 +172,73 @@ export default function AdminStudents() {
 
   const handleAddStudent = async () => {
     if (!schoolId) return;
-    await addDoc(
-      collection(db, "schools", schoolId, "students"),
-      {
+    try {
+      // 1. Create Student
+      const studentData = {
         name: sanitizeText(formData.name),
         class: sanitizeText(formData.class),
         parentContact: sanitizePhone(formData.parentContact),
-        feesStatus: formData.feesStatus,
+        feesStatus: "unpaid",
         attendance: formData.attendance,
         id: `ST-${Date.now().toString().slice(-4)}`,
         createdAt: serverTimestamp(),
+      };
+
+      const studentRef = await addDoc(
+        collection(db, "schools", schoolId, "students"),
+        studentData
+      );
+
+      // 2. Create Fee Record
+      try {
+        // Fetch settings for fee calculation
+        let term = "Term 1";
+        let year = new Date().getFullYear().toString();
+        let feeStructure = DEFAULT_FEE_STRUCTURE;
+
+        const settingsDoc = await getDoc(doc(db, "schools", schoolId, "settings", "general"));
+        if (settingsDoc.exists()) {
+          const data = settingsDoc.data();
+          if (data.termSettings) {
+            term = data.termSettings.currentTerm || term;
+            year = data.termSettings.academicYear || year;
+          }
+          if (data.feeStructure && Array.isArray(data.feeStructure)) {
+            feeStructure = {
+              senior1_2: data.feeStructure.find((t: any) => t.level.includes("1 & 2"))?.amount || DEFAULT_FEE_STRUCTURE.senior1_2,
+              senior3_4: data.feeStructure.find((t: any) => t.level.includes("3 & 4"))?.amount || DEFAULT_FEE_STRUCTURE.senior3_4,
+              senior5_6: data.feeStructure.find((t: any) => t.level.includes("5 & 6"))?.amount || DEFAULT_FEE_STRUCTURE.senior5_6,
+            };
+          }
+        }
+
+        const termFee = getTermFee(formData.class, feeStructure);
+        const feeId = crypto.randomUUID();
+
+        await setDoc(doc(db, "schools", schoolId, "fees", feeId), {
+          studentId: studentRef.id,
+          studentName: formData.name,
+          class: formData.class,
+          termFee: termFee,
+          amountPaid: 0,
+          balance: termFee,
+          status: "unpaid",
+          term: term,
+          academicYear: year,
+          createdAt: serverTimestamp()
+        });
+      } catch (feeErr) {
+        console.error("Fee creation failed:", feeErr);
+        toast.warning("Student saved but fee record could not be created — go to Fee Initialisation to fix this.");
       }
-    );
-    setShowAddModal(false);
-    setFormData({ name: "", class: "", parentContact: "", feesStatus: "unpaid", attendance: "0%" });
+
+      setShowAddModal(false);
+      setFormData({ name: "", class: "", parentContact: "", feesStatus: "unpaid", attendance: "0%" });
+      toast.success("Student registration complete.");
+    } catch (err) {
+      console.error("Student registration failed:", err);
+      toast.error("Failed to register student.");
+    }
   };
 
   const handleEditStudent = async () => {

@@ -42,9 +42,9 @@ export default function AdminApprovalsPage() {
   const handleApprove = async (applicant: Applicant) => {
     if (!schoolId) return;
     try {
-      // Update user status to active
+      // Update user status to approved
       await updateDoc(doc(db, "users", applicant.uid), {
-        status: "active",
+        status: "approved",
         approvedAt: serverTimestamp(),
         approvedBy: auth.currentUser?.uid,
       });
@@ -62,7 +62,7 @@ export default function AdminApprovalsPage() {
             email: applicant.email,
             teacherUid: applicant.uid,
             teacherCode,
-            status: "active",
+            status: "approved",
             classes: [],
             subject: "",
             phone: "",

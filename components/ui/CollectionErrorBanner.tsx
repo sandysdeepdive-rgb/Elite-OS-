@@ -23,15 +23,40 @@ export default function CollectionErrorBanner({ error }: { error: string | null 
     );
   }
 
-  if (error === "permission_denied") {
+  if (error === "permission_denied" || error === "access_denied") {
     return (
       <div className="flex items-center gap-3 p-4 rounded-xl
                       bg-error/8 border border-error/20 mb-4">
         <span className="material-symbols-outlined text-[20px]
                          text-error">lock</span>
-        <p className="font-body text-sm text-error font-light">
-          Access restricted. Contact your administrator.
-        </p>
+        <div className="flex-1">
+          <p className="font-body text-sm text-error font-medium">
+            Access Restricted
+          </p>
+          <p className="font-body text-xs text-error/80 mt-0.5">
+            Your role does not have permission to view this specific collection. 
+            Ensure you are assigned the correct school and role.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error === "account_setup_incomplete") {
+    return (
+      <div className="flex items-center gap-3 p-4 rounded-xl
+                      bg-orange-500/10 border border-orange-500/20 mb-4">
+        <span className="material-symbols-outlined text-[20px]
+                         text-orange-500">warning</span>
+        <div className="flex-1">
+          <p className="font-body text-sm text-orange-600 font-medium">
+            Account Setup Incomplete
+          </p>
+          <p className="font-body text-xs text-orange-600/80 mt-0.5">
+            Your login exists but your user profile was not found. 
+            Try logging out and back in, or contact technical support.
+          </p>
+        </div>
       </div>
     );
   }

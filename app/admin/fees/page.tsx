@@ -10,11 +10,15 @@ import EliteInput from "@/components/ui/EliteInput";
 import DataTable from "@/components/ui/DataTable";
 import Badge from "@/components/ui/Badge";
 import CollectionErrorBanner from "@/components/ui/CollectionErrorBanner";
+import PayFeeButton from "@/components/PayFeeButton";
 import { exportToExcel } from "@/lib/utils/importExport";
 import { useSchoolData, useCollection } from "@/lib/hooks/useSchoolData";
-import { doc, updateDoc } from "firebase/firestore";
+import { doc, updateDoc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 import { SMS } from "@/lib/utils/sms";
+import { toast } from "sonner";
+import { useEffect } from "react";
+import Link from "next/link";
 
 interface FeeRecord {
   id: string;
@@ -26,10 +30,12 @@ interface FeeRecord {
   balance: number;
   status: "paid" | "partial" | "unpaid";
   lastPayment: string;
+  term?: string;
+  academicYear?: string;
 }
 
 export default function AdminFeesPage() {
-  const { schoolId, schoolName, adminName } = useSchoolData();
+  const { schoolId, schoolName, adminName, adminEmail } = useSchoolData();
   const { data: fees, loading, error: feesError } = useCollection<FeeRecord>(schoolId, "fees");
 
   const [search, setSearch] = useState("");
@@ -39,9 +45,49 @@ export default function AdminFeesPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [sendingReminders, setSendingReminders] = useState(false);
+  const [termSettings, setTermSettings] = useState<{ currentTerm: string, academicYear: string } | null>(null);
+
+  // Fetch current term settings
+  useEffect(() => {
+    if (!schoolId) return;
+    const fetchSettings = async () => {
+      try {
+        const settingsDoc = await getDoc(doc(db, "schools", schoolId, "settings", "general"));
+        if (settingsDoc.exists()) {
+          const data = settingsDoc.data();
+          if (data.termSettings) {
+            setTermSettings(data.termSettings);
+          } else if (data.currentTerm) {
+            // Fallback for different data structure
+            setTermSettings({
+              currentTerm: data.currentTerm,
+              academicYear: data.academicYear || new Date().getFullYear().toString()
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching settings:", err);
+      }
+    };
+    fetchSettings();
+  }, [schoolId]);
 
   // We need students data to get parentContact
   const { data: students } = useCollection<any>(schoolId, "students");
+
+  // Identify students without fee records for the current term
+  const missingFeeRecords = useMemo(() => {
+    if (!termSettings || !students.length) return [];
+    
+    return students.filter(student => {
+      const hasFee = fees.some(fee => 
+        fee.studentId === student.id && 
+        fee.term === termSettings.currentTerm && 
+        fee.academicYear === termSettings.academicYear
+      );
+      return !hasFee;
+    });
+  }, [students, fees, termSettings]);
 
   // Live calculations
   const totalExpected = fees.reduce((sum, f) => sum + (f.termFee || 0), 0);
@@ -140,6 +186,34 @@ export default function AdminFeesPage() {
         <TopAppBar title="Fee Management" subtitle="Financial Ledger" />
         <main className="flex-1 px-6 py-8 max-w-5xl mx-auto w-full space-y-6">
           <CollectionErrorBanner error={feesError} />
+          
+          {/* Section 0 — Initialization Banner */}
+          {missingFeeRecords.length > 0 && (
+            <GlassCard padding="p-4" className="border-amber-500/30 bg-amber-500/5">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-600 flex items-center justify-center">
+                    <span className="material-symbols-outlined text-[20px]">warning</span>
+                  </div>
+                  <div>
+                    <h4 className="font-headline text-lg font-light text-amber-900 leading-tight">
+                      {missingFeeRecords.length} students have no fee record for this term.
+                    </h4>
+                    <p className="font-body text-xs text-amber-800/70">
+                      Fees cannot be tracked or paid for these students until they are initialized.
+                    </p>
+                  </div>
+                </div>
+                <Link href="/admin/fees/initialize">
+                  <EliteButton variant="primary" className="bg-amber-600 hover:bg-amber-700 text-white border-none shadow-amber-900/10">
+                    Initialize Fee Records
+                    <span className="material-symbols-outlined text-[18px] ml-2">arrow_forward</span>
+                  </EliteButton>
+                </Link>
+              </div>
+            </GlassCard>
+          )}
+
           {/* Section 1 — Fee summary cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {[
@@ -290,6 +364,21 @@ export default function AdminFeesPage() {
                 </span>
                 Export
               </EliteButton>
+              <EliteButton variant="outlined" size="sm" onClick={async () => {
+                const toastId = toast.loading("Syncing Pesapal IPN...");
+                try {
+                  const res = await fetch("/api/payments/pesapal-ipn", { method: "POST" });
+                  if (res.ok) toast.success("Pesapal IPN Registered!", { id: toastId });
+                  else toast.error("Sync Failed", { id: toastId });
+                } catch {
+                  toast.error("Network Error", { id: toastId });
+                }
+              }}>
+                <span className="material-symbols-outlined text-[16px] mr-1.5">
+                  sync
+                </span>
+                Sync IPN
+              </EliteButton>
               <EliteButton variant="outlined" size="sm"
                 loading={sendingReminders}
                 onClick={handleSendFeeReminders}>
@@ -384,6 +473,22 @@ export default function AdminFeesPage() {
                   <span className="font-label text-[10px] text-outline">
                     {String(v)}
                   </span>
+                ),
+              },
+              {
+                key: "payment",
+                label: "Payment",
+                width: "110px",
+                align: "center",
+                render: (_, row) => (
+                  <PayFeeButton
+                    schoolId={schoolId || ""}
+                    feeId={(row as FeeRecord).id}
+                    studentId={(row as FeeRecord).studentId}
+                    studentName={(row as FeeRecord).name}
+                    balance={(row as FeeRecord).balance}
+                    payerEmail={adminEmail || ""}
+                  />
                 ),
               },
               {
