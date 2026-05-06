@@ -1,4 +1,6 @@
+import type { Metadata } from 'next';
 import { Cormorant_Garamond, DM_Sans, DM_Mono } from 'next/font/google';
+import './globals.css';
 
 const cormorant = Cormorant_Garamond({
   subsets: ['latin'],
@@ -17,4 +19,19 @@ const dmMono = DM_Mono({
   variable: '--font-dm-mono',
 });
 
-<html className={`${cormorant.variable} ${dmSans.variable} ${dmMono.variable}`}>
+export const metadata: Metadata = {
+  title: 'EliteSchool OS',
+  description: 'Premium School Management Platform',
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en" className={`${cormorant.variable} ${dmSans.variable} ${dmMono.variable}`}>
+      <body>{children}</body>
+    </html>
+  );
+}
