@@ -84,7 +84,14 @@ function AIAssistantContent() {
           temperature: 0.7,
         }
       });
-      const aiResponse = responseStream.text() || "I could not generate a response. Please try again.";
+      if (!responseStream) {
+        setResponse("I could not generate a response. Please try again.");
+        return;
+      }
+
+      const aiResponse = typeof responseStream.text === 'function'
+        ? responseStream.text()
+        : "I could not generate a response. Please try again.";
       setResponse(aiResponse);
       setHistory([
         ...newHistory,
