@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase/admin";
+import { getDocument } from "@/lib/firestore-rest";
 
 export async function GET(req: NextRequest) {
   const uid = req.nextUrl.searchParams.get("uid");
@@ -10,15 +10,14 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const userDoc = await adminDb.collection("users").doc(uid).get();
+    const data = await getDocument(`users/${uid}`);
     
-    if (!userDoc.exists) {
+    if (!data) {
       return NextResponse.json({ valid: false, reason: "no_profile" });
     }
 
-    const data = userDoc.data();
-    const status = data?.status?.toLowerCase().trim();
-    const role = data?.role?.toLowerCase().trim();
+    const status = (data?.status as string)?.toLowerCase().trim();
+    const role = (data?.role as string)?.toLowerCase().trim();
 
     if (status !== "approved") {
       return NextResponse.json({ valid: false, reason: "not_approved" });

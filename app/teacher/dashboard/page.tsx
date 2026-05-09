@@ -17,7 +17,10 @@ interface Student {
   attendance?: string;
 }
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function TeacherDashboardPage() {
+  useAuthGuard('teacher');
   const { teacherProfile, loading } = useTeacherData();
   const { data: students, error: studentsError } = useCollection<Student>(
     teacherProfile?.schoolId || null, "students"

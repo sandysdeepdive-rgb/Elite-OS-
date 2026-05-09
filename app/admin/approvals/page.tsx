@@ -24,7 +24,10 @@ interface Applicant {
   role: string;
 }
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function AdminApprovalsPage() {
+  useAuthGuard('admin');
   const { schoolId, schoolName, adminName } = useSchoolData();
   const { data: pendingUsers, error: pendingUsersError } = useCollection<Applicant>(schoolId, "pendingUsers");
   const { data: teachers, error: teachersError } = useCollection(schoolId, "teachers");

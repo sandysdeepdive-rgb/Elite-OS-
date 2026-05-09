@@ -6,7 +6,10 @@ import TopAppBar from "@/components/layout/TopAppBar";
 import BottomNavBar, { ADMIN_NAV_ITEMS } from "@/components/layout/BottomNavBar";
 import ProfileContent from "@/components/features/ProfileContent";
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function AdminProfile() {
+  useAuthGuard('admin');
   return (
     <AuthGate requiredRole="admin">
       <div className="flex min-h-screen mesh-gradient-bg">

@@ -34,53 +34,58 @@ export default function GoogleSetupPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!name.trim()) { toast.error("Name is required."); return; }
+    if (!schoolCode.trim()) { toast.error("School code is required."); return; }
+    if (role === "parent" && !studentId.trim()) {
+      toast.error("Student ID is required for parents.");
+      return;
+    }
+
+    // Verify uid matches currently signed-in user
+    const { auth } = await import("@/lib/firebase/config");
+    const currentUser = auth.currentUser;
+    if (!currentUser || currentUser.uid !== uid) {
+      toast.error("Session expired. Please sign in again.");
+      router.push("/");
+      return;
+    }
+
     setLoading(true);
-
     try {
-      const { collection, query, where, getDocs, doc, setDoc } = await import("firebase/firestore");
-      const { db } = await import("@/lib/firebase/config");
+      const res = await fetch("/api/auth/google-complete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-secret": process.env.NEXT_PUBLIC_API_SECRET!,
+        },
+        body: JSON.stringify({
+          uid,
+          email,
+          name: name.trim(),
+          role,
+          schoolCode: schoolCode.trim().toUpperCase(),
+          studentId: role === "parent" ? studentId.trim().toUpperCase() : undefined,
+        }),
+      });
 
-      const schoolCodeUpper = schoolCode.trim().toUpperCase();
-      const schoolsSnap = await getDocs(query(collection(db, "schools"), where("schoolCode", "==", schoolCodeUpper)));
-      
-      if (schoolsSnap.empty) {
-        toast.error("Invalid school code");
-        setLoading(false);
+      const data = await res.json();
+
+      if (!res.ok) {
+        toast.error(data.error || "Registration failed. Please try again.");
         return;
       }
-      
-      const matchedSchoolId = schoolsSnap.docs[0].id;
-      
-      let linkedStudentId = null;
-
-      if (role === 'parent') {
-        const studentIdUpper = studentId.trim().toUpperCase();
-        const studentSnap = await getDocs(query(collection(db, "schools", matchedSchoolId, "students"), where("id", "==", studentIdUpper)));
-        linkedStudentId = studentSnap.empty ? studentIdUpper : studentSnap.docs[0].id;
-      }
-
-      await setDoc(doc(db, "users", uid), {
-        uid,
-        email: email.toLowerCase().trim(),
-        name,
-        role,
-        schoolId: matchedSchoolId,
-        schoolCode: schoolCodeUpper,
-        status: "pending",
-        linkedId: linkedStudentId,
-        phone: null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
 
       sessionStorage.removeItem("google_pending_uid");
       sessionStorage.removeItem("google_pending_email");
       sessionStorage.removeItem("google_pending_name");
 
-      toast.success("Registration completed!");
+      toast.success("Registration complete! Awaiting admin approval.");
       router.push("/pending-approval");
-    } catch (err) {
-      toast.error("Network error. Please try again.");
+
+    } catch {
+      toast.error("Network error. Please check your connection and try again.");
+    } finally {
       setLoading(false);
     }
   };

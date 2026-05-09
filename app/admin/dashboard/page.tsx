@@ -43,7 +43,10 @@ function NotificationBell() {
 
 import ErrorBoundary from "@/components/ui/ErrorBoundary";
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function AdminDashboard() {
+  useAuthGuard('admin');
   const [dateString, setDateString] = useState("");
   const { schoolId, schoolName, adminName, authError, loading: schoolLoading } = useSchoolData();
   

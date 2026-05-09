@@ -23,7 +23,10 @@ const REPORT_TABS = [
   { label: "Graphical", icon: "bar_chart" },
 ];
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function AdminReportsPage() {
+  useAuthGuard('admin');
   const [activeTab, setActiveTab] = useState(0);
   const [generating, setGenerating] = useState(false);
   const { schoolId, schoolName, adminName } = useSchoolData();

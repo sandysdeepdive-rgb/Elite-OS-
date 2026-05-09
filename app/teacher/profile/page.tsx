@@ -5,7 +5,10 @@ import TopAppBar from "@/components/layout/TopAppBar";
 import BottomNavBar, { TEACHER_NAV_ITEMS } from "@/components/layout/BottomNavBar";
 import ProfileContent from "@/components/features/ProfileContent";
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function TeacherProfile() {
+  useAuthGuard('teacher');
   return (
     <AuthGate requiredRole="teacher">
       <div className="flex min-h-screen mesh-gradient-bg">

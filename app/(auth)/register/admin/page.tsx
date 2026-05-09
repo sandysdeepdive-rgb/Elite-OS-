@@ -28,8 +28,8 @@ export default function AdminSignupPage() {
     setLoading(true);
     setError("");
 
-    // Validate
-    if (!fullName || !email || !password || !schoolName) {
+    // Validation
+    if (!fullName.trim() || !email.trim() || !password || !schoolName.trim() || !schoolCode.trim()) {
       setError("All fields are required.");
       setLoading(false);
       return;
@@ -39,99 +39,65 @@ export default function AdminSignupPage() {
       setLoading(false);
       return;
     }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.");
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
       setLoading(false);
       return;
     }
-
-    // Rate limiting check
-    const attempts = parseInt(localStorage.getItem('reg_attempts') || '0', 10);
-    const timeout = parseInt(localStorage.getItem('reg_timeout') || '0', 10);
-    
-    if (timeout > Date.now()) {
-      const minutesLeft = Math.ceil((timeout - Date.now()) / 60000);
-      setError(`Too many attempts. Please try again in ${minutesLeft} minutes.`);
+    if (!/^[a-zA-Z0-9-]{3,20}$/.test(schoolCode.trim())) {
+      setError("School code must be 3–20 characters, letters, numbers, and hyphens only.");
       setLoading(false);
       return;
     }
 
     let userCredential;
     try {
-      // Step 1 — Create Firebase Auth account
       userCredential = await createUserWithEmailAndPassword(
         auth, sanitizeEmail(email), password
       );
-    } catch (authError: any) {
-      const newAttempts = attempts + 1;
-      localStorage.setItem('reg_attempts', newAttempts.toString());
-      if (newAttempts >= 5) {
-        localStorage.setItem('reg_timeout', (Date.now() + 15 * 60000).toString());
-      }
-      setError(getAuthErrorMessage(authError.code));
+    } catch (authError: unknown) {
+      const code = authError instanceof Error
+        ? (authError as { code?: string }).code || ""
+        : "";
+      setError(getAuthErrorMessage(code));
       setLoading(false);
       return;
     }
 
     const uid = userCredential.user.uid;
 
-    // Step 2 — Call server-side route
-    // Note: Due to missing Firebase Admin SDK credentials in this environment, 
-    // the server API route fails. We implement the atomic batch securely on the client.
     try {
-      const generatedSchoolId = "school-" + Date.now() + "-" + Math.random().toString(36).substring(2, 8);
-      
-      const { collection, query, where, getDocs, writeBatch } = await import("firebase/firestore");
-      
-      // Check if school code exists
-      const schoolQuery = query(collection(db, "schools"), where("schoolCode", "==", schoolCode));
-      const schoolSnap = await getDocs(schoolQuery);
-      if (!schoolSnap.empty) {
+      const res = await fetch("/api/auth/register-admin", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-secret": process.env.NEXT_PUBLIC_API_SECRET!,
+        },
+        body: JSON.stringify({
+          uid,
+          email: sanitizeEmail(email),
+          name: sanitizeText(fullName),
+          schoolName: sanitizeText(schoolName),
+          schoolCode: schoolCode.trim().toUpperCase(),
+          phone: null,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
         await deleteUser(userCredential.user);
-        setError("School code already in use.");
+        setError(data.error || "Registration failed. Please try again.");
         setLoading(false);
         return;
       }
 
-      const batch = writeBatch(db);
+      toast.success("School registered successfully! Welcome to EliteSchool OS.");
+      router.push("/admin");
 
-      batch.set(doc(db, "schools", generatedSchoolId), {
-        schoolId: generatedSchoolId,
-        schoolName,
-        schoolCode,
-        adminUid: uid,
-        createdAt: new Date().toISOString(),
-        plan: "trial",
-        active: true
-      });
-
-      batch.set(doc(db, "users", uid), {
-        uid,
-        email: email.toLowerCase().trim(),
-        name: fullName,
-        role: "admin",
-        schoolId: generatedSchoolId,
-        schoolCode,
-        status: "approved",
-        linkedId: null,
-        phone: null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
-
-      // We omit creating the feeStructure settings doc here to avoid security rules 
-      // rejecting the batch due to get() checking the user's previous (non-existent) state.
-      // The dashboard can initialize it if missing!
-
-      await batch.commit();
-
-      // SUCCESS
-      toast.success('Registration successful! Redirecting to dashboard.');
-      router.push('/admin/dashboard');
-
-    } catch (err: unknown) {
+    } catch {
       await deleteUser(userCredential.user);
-      setError('Registration failed. Please check your connection and try again.');
+      setError("Registration failed. Please check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -315,14 +281,7 @@ export default function AdminSignupPage() {
 
       {/* Aesthetic Decorative Element (Asymmetric Intent) */}
       <div className="fixed bottom-0 right-0 p-12 hidden lg:block z-10 pointer-events-none">
-        <div className="w-64 h-64 opacity-20 transform rotate-12">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            alt="Institutional Detail"
-            className="w-full h-full object-cover rounded-xl filter grayscale contrast-125"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuCwZx4KP9TGpBiXy4jP24wr5pkbdhMuGYWd-OXkYLEC8KxMQE-s2ailaeSqoDtiiSCH96sUWXCkRlp5jKTYEmgkUQ_QJrXMW04SUGexTxSpcTIJxDnHOmuuyZKG3qHmOcLzXcUZkTDhUOvg9Bka9jjuMK11QhJLkugyT1x2obpNYryULJXrCF3R-09DnsMKyEtTSBR20UzV_5YtegaaUaParMcWh1nP0yk7FHIs-BqW9rQCrHDAFlPHJizSabuVpwrwpvwptEu9U_Xs"
-          />
-        </div>
+        <div className="w-64 h-64 opacity-20 transform rotate-12 bg-primary/20 rounded-xl filter grayscale contrast-125 border border-primary/30"></div>
         <div className="mt-4 flex items-center gap-2">
           <div className="h-px w-8 bg-on-tertiary-container/30"></div>
           <span className="font-technical text-[10px] text-on-tertiary-container uppercase tracking-[0.2em]">

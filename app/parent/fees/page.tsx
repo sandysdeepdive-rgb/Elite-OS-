@@ -4,6 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import BottomNavBar, { PARENT_NAV_ITEMS } from "@/components/layout/BottomNavBar";
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
 import CollectionErrorBanner from "@/components/ui/CollectionErrorBanner";
 import { useParentData } from "@/lib/hooks/useParentData";
 import { useChildCollection } from "@/lib/hooks/useSchoolData";
@@ -104,6 +105,7 @@ function CustomTopAppBar({ initials }: { initials: string }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ParentFeesPage() {
+  useAuthGuard('parent');
   const router = useRouter();
   const [activeTerm, setActiveTerm] = useState<string>("Term 2");
   const [showPayModal, setShowPayModal] = useState(false);

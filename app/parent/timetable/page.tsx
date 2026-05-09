@@ -3,6 +3,7 @@ import { useState } from "react";
 import AuthGate from "@/components/layout/AuthGate";
 import TopAppBar from "@/components/layout/TopAppBar";
 import BottomNavBar, { PARENT_NAV_ITEMS } from "@/components/layout/BottomNavBar";
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
 import GlassCard from "@/components/ui/GlassCard";
 import Badge from "@/components/ui/Badge";
 import { useParentData } from "@/lib/hooks/useParentData";
@@ -218,6 +219,7 @@ function ParentTimetableContent() {
 }
 
 export default function ParentTimetable() {
+  useAuthGuard('parent');
   return (
     <AuthGate requiredRole="parent">
       <ParentTimetableContent />

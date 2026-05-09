@@ -58,7 +58,10 @@ const INITIAL_TIMETABLE: TimetableData = {
   "S.5A-0-5": { subject: "CHEM", teacherCode: "05", room: "Lab 3", teacherId: "t5" },
 };
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function AdminTimetablePage() {
+  useAuthGuard('admin');
   const { schoolId, schoolName, adminName, loading } = useSchoolData();
   const [activeDay, setActiveDay] = useState(0);
   const [timetable, setTimetable] = useState<TimetableData>(INITIAL_TIMETABLE);

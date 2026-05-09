@@ -28,7 +28,10 @@ interface ClassRecord {
   status: "active" | "inactive";
 }
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function AdminClassesPage() {
+  useAuthGuard('admin');
   const { schoolId, schoolName, adminName } = useSchoolData();
   const { data: classes, loading, error: classesError } = useCollection<ClassRecord>(schoolId, "classes");
 

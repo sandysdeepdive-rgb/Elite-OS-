@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from "react";
+import { useAuthGuard } from "@/lib/hooks/useAuthGuard";
 import AdminSidebar from "@/components/layout/AdminSidebar";
 import TopAppBar from "@/components/layout/TopAppBar";
 import BottomNavBar, { ADMIN_NAV_ITEMS } from "@/components/layout/BottomNavBar";
@@ -28,7 +29,40 @@ interface Student {
   attendance: string;
 }
 
+interface TermSettings {
+  term: string;
+  year: string;
+  feeStructure: FeeStructure;
+}
+
+const fetchTermSettings = async (schoolId: string): Promise<TermSettings> => {
+  const defaults = {
+    term: "Term 1",
+    year: new Date().getFullYear().toString(),
+    feeStructure: DEFAULT_FEE_STRUCTURE
+  };
+  try {
+    const settingsDoc = await getDoc(doc(db, "schools", schoolId, "settings", "general"));
+    if (!settingsDoc.exists()) return defaults;
+    const data = settingsDoc.data();
+    const term = data.termSettings?.currentTerm || defaults.term;
+    const year = data.termSettings?.academicYear || defaults.year;
+    let feeStructure = defaults.feeStructure;
+    if (Array.isArray(data.feeStructure)) {
+      feeStructure = {
+        senior1_2: data.feeStructure.find((t: { level: string; amount: number }) => t.level.includes("1 & 2"))?.amount || defaults.feeStructure.senior1_2,
+        senior3_4: data.feeStructure.find((t: { level: string; amount: number }) => t.level.includes("3 & 4"))?.amount || defaults.feeStructure.senior3_4,
+        senior5_6: data.feeStructure.find((t: { level: string; amount: number }) => t.level.includes("5 & 6"))?.amount || defaults.feeStructure.senior5_6,
+      };
+    }
+    return { term, year, feeStructure };
+  } catch {
+    return defaults;
+  }
+};
+
 export default function AdminStudents() {
+  useAuthGuard("admin");
   const { schoolId, schoolName, adminName } = useSchoolData();
   const { data: students, loading, error: studentsError } = useCollection<Student>(schoolId, "students");
 
@@ -52,35 +86,7 @@ export default function AdminStudents() {
   const handleImportStudents = async (rows: Record<string, unknown>[]) => {
     if (!schoolId) return;
 
-    // Fetch settings for fee calculation
-    let term = "Term 1";
-    let year = new Date().getFullYear().toString();
-    let feeStructure = DEFAULT_FEE_STRUCTURE;
-
-    try {
-      const settingsDoc = await getDoc(doc(db, "schools", schoolId, "settings", "general"));
-      if (settingsDoc.exists()) {
-        const data = settingsDoc.data();
-        if (data.termSettings) {
-          term = data.termSettings.currentTerm || term;
-          year = data.termSettings.academicYear || year;
-        }
-        if (data.feeStructure) {
-          // Normalize array from settings to object needed by getTermFee if necessary
-          // But our lib/fees.ts expects an object with specific keys.
-          // Based on settings/page.tsx, it might be an array.
-          if (Array.isArray(data.feeStructure)) {
-            feeStructure = {
-              senior1_2: data.feeStructure.find((t: any) => t.level.includes("1 & 2"))?.amount || DEFAULT_FEE_STRUCTURE.senior1_2,
-              senior3_4: data.feeStructure.find((t: any) => t.level.includes("3 & 4"))?.amount || DEFAULT_FEE_STRUCTURE.senior3_4,
-              senior5_6: data.feeStructure.find((t: any) => t.level.includes("5 & 6"))?.amount || DEFAULT_FEE_STRUCTURE.senior5_6,
-            };
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Error fetching settings:", err);
-    }
+    const { term, year, feeStructure } = await fetchTermSettings(schoolId);
 
     const total = rows.filter(r => r.name).length;
     let count = 0;
@@ -131,14 +137,14 @@ export default function AdminStudents() {
               academicYear: year,
               createdAt: serverTimestamp()
             });
-          } catch (feeErr) {
-            console.error("Fee creation failed for imported student:", feeErr);
+          } catch (feeErr: unknown) {
+            console.error("Fee creation failed for imported student:", feeErr instanceof Error ? feeErr.message : "Unknown error");
             failedFees++;
           }
           
           count++;
-        } catch (err) {
-          console.error("Import error:", err);
+        } catch (err: unknown) {
+          console.error("Import error:", err instanceof Error ? err.message : "Unknown error");
         }
       }));
       
@@ -172,6 +178,20 @@ export default function AdminStudents() {
 
   const handleAddStudent = async () => {
     if (!schoolId) return;
+
+    if (!formData.name.trim()) {
+      toast.error("Student name is required.");
+      return;
+    }
+    if (!formData.class) {
+      toast.error("Please select a class.");
+      return;
+    }
+    if (!formData.parentContact.trim()) {
+      toast.error("Parent contact is required.");
+      return;
+    }
+
     try {
       // 1. Create Student
       const studentData = {
@@ -180,7 +200,6 @@ export default function AdminStudents() {
         parentContact: sanitizePhone(formData.parentContact),
         feesStatus: "unpaid",
         attendance: formData.attendance,
-        id: `ST-${Date.now().toString().slice(-4)}`,
         createdAt: serverTimestamp(),
       };
 
@@ -191,26 +210,7 @@ export default function AdminStudents() {
 
       // 2. Create Fee Record
       try {
-        // Fetch settings for fee calculation
-        let term = "Term 1";
-        let year = new Date().getFullYear().toString();
-        let feeStructure = DEFAULT_FEE_STRUCTURE;
-
-        const settingsDoc = await getDoc(doc(db, "schools", schoolId, "settings", "general"));
-        if (settingsDoc.exists()) {
-          const data = settingsDoc.data();
-          if (data.termSettings) {
-            term = data.termSettings.currentTerm || term;
-            year = data.termSettings.academicYear || year;
-          }
-          if (data.feeStructure && Array.isArray(data.feeStructure)) {
-            feeStructure = {
-              senior1_2: data.feeStructure.find((t: any) => t.level.includes("1 & 2"))?.amount || DEFAULT_FEE_STRUCTURE.senior1_2,
-              senior3_4: data.feeStructure.find((t: any) => t.level.includes("3 & 4"))?.amount || DEFAULT_FEE_STRUCTURE.senior3_4,
-              senior5_6: data.feeStructure.find((t: any) => t.level.includes("5 & 6"))?.amount || DEFAULT_FEE_STRUCTURE.senior5_6,
-            };
-          }
-        }
+        const { term, year, feeStructure } = await fetchTermSettings(schoolId);
 
         const termFee = getTermFee(formData.class, feeStructure);
         const feeId = crypto.randomUUID();
@@ -227,36 +227,53 @@ export default function AdminStudents() {
           academicYear: year,
           createdAt: serverTimestamp()
         });
-      } catch (feeErr) {
-        console.error("Fee creation failed:", feeErr);
+      } catch (feeErr: unknown) {
+        console.error("Fee creation failed:", feeErr instanceof Error ? feeErr.message : "Unknown error");
         toast.warning("Student saved but fee record could not be created — go to Fee Initialisation to fix this.");
       }
 
       setShowAddModal(false);
       setFormData({ name: "", class: "", parentContact: "", feesStatus: "unpaid", attendance: "0%" });
       toast.success("Student registration complete.");
-    } catch (err) {
-      console.error("Student registration failed:", err);
+    } catch (err: unknown) {
+      console.error("Student registration failed:", err instanceof Error ? err.message : "Unknown error");
       toast.error("Failed to register student.");
     }
   };
 
   const handleEditStudent = async () => {
     if (!schoolId || !editStudent) return;
-    await updateDoc(
-      doc(db, "schools", schoolId, "students", editStudent.id),
-      { ...formData }
-    );
-    setEditStudent(null);
-    setFormData({ name: "", class: "", parentContact: "", feesStatus: "unpaid", attendance: "0%" });
+    try {
+      await updateDoc(
+        doc(db, "schools", schoolId, "students", editStudent.id),
+        {
+          name: sanitizeText(formData.name),
+          class: sanitizeText(formData.class),
+          parentContact: sanitizePhone(formData.parentContact),
+          updatedAt: serverTimestamp(),
+        }
+      );
+      setEditStudent(null);
+      setFormData({ name: "", class: "", parentContact: "", feesStatus: "unpaid", attendance: "0%" });
+      toast.success("Student updated successfully.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      toast.error("Failed to update student. Please try again.");
+      console.error("Edit student error:", message);
+    }
   };
 
   const handleDeleteStudent = async () => {
     if (!schoolId || !deleteStudent) return;
-    await deleteDoc(
-      doc(db, "schools", schoolId, "students", deleteStudent.id)
-    );
-    setDeleteStudent(null);
+    try {
+      await deleteDoc(doc(db, "schools", schoolId, "students", deleteStudent.id));
+      setDeleteStudent(null);
+      toast.success("Student removed.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      toast.error("Failed to delete student. Please try again.");
+      console.error("Delete student error:", message);
+    }
   };
 
   const openEditModal = (student: Student) => {

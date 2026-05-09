@@ -34,7 +34,10 @@ interface FeeRecord {
   academicYear?: string;
 }
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function AdminFeesPage() {
+  useAuthGuard('admin');
   const { schoolId, schoolName, adminName, adminEmail } = useSchoolData();
   const { data: fees, loading, error: feesError } = useCollection<FeeRecord>(schoolId, "fees");
 

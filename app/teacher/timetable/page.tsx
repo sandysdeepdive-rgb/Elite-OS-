@@ -97,7 +97,10 @@ function CustomTopAppBar({ initials }: { initials: string }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function TeacherTimetablePage() {
+  useAuthGuard('teacher');
   const router = useRouter();
   const [activeDay, setActiveDay] = useState("Fri");
   const [selectedEntry, setSelectedEntry] = useState<TimetableEntry | null>(null);

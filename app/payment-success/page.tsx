@@ -16,20 +16,20 @@ export default async function PaymentSuccessPage({
           <span className="material-symbols-outlined text-green-600 text-4xl">check_circle</span>
         </div>
         
-        <h1 className="text-5xl font-light text-[#2B4D5A]" style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+        <h1 className="text-5xl font-light text-[#2B4D5A] font-headline">
           Payment Successful
         </h1>
         
-        <p className="text-lg font-light text-[#5f5e60] leading-relaxed" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+        <p className="text-lg font-light text-[#5f5e60] leading-relaxed font-body">
           Thank you. Your school fee payment has been processed successfully. Your account balance will be updated shortly.
         </p>
 
         {ref && (
           <div className="bg-white/40 border border-[#c1c7cb]/20 rounded-2xl p-4">
-            <p className="text-[10px] text-[#72787b] uppercase tracking-widest mb-1" style={{ fontFamily: "'DM Mono', monospace" }}>
+            <p className="text-[10px] text-[#72787b] uppercase tracking-widest mb-1 font-mono">
               Reference Number
             </p>
-            <p className="font-medium text-[#1b1c19] text-sm" style={{ fontFamily: "'DM Mono', monospace" }}>
+            <p className="font-medium text-[#1b1c19] text-sm font-mono">
               {ref}
             </p>
           </div>
@@ -38,8 +38,7 @@ export default async function PaymentSuccessPage({
         <div className="pt-8">
           <Link
             href="/"
-            className="inline-block bg-[#2B4D5A] text-white px-8 py-3 rounded-full text-sm font-medium transition-all hover:opacity-90 active:scale-95"
-            style={{ fontFamily: "'DM Sans', sans-serif" }}
+            className="inline-block bg-[#2B4D5A] text-white px-8 py-3 rounded-full text-sm font-medium transition-all hover:opacity-90 active:scale-95 font-body"
           >
             Back to Dashboard
           </Link>

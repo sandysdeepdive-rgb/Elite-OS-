@@ -1,8 +1,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getPesapalToken, getPesapalBaseUrl } from "@/lib/pesapal";
-import { adminDb } from "@/lib/firebase/admin";
-import admin from "firebase-admin";
+import { getDocument, setDocument, patchDocument } from "@/lib/firestore-rest";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -31,51 +30,88 @@ export async function GET(req: NextRequest) {
     const paymentStatus = statusData.payment_status_description; // "Completed", "Failed", etc.
 
     // Extract schoolId and feeId
-    const parts = merchantReference.split("-");
+    const parts = merchantReference.split("__");
+    if (parts.length < 3) {
+      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/payment-failed?error=invalid_reference`);
+    }
     const schoolId = parts[0];
     const feeId = parts[1];
 
+    if (!schoolId || !feeId) {
+      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/payment-failed?error=invalid_reference`);
+    }
+
+    // Check if this orderTrackingId was already processed
+    const sessionPath = `schools/${schoolId}/paymentSessions/${merchantReference}`;
+    const sessionData = await getDocument(sessionPath);
+
+    if (sessionData && sessionData.status === "completed") {
+      // Already processed — redirect to success without reprocessing
+      return NextResponse.redirect(
+        `${process.env.NEXT_PUBLIC_APP_URL}/payment-success?ref=${merchantReference}&duplicate=true`
+      );
+    }
+
+    const now = new Date().toISOString();
+
     if (paymentStatus === "Completed") {
       // Update Firestore
-      const feeRef = adminDb.collection("schools").doc(schoolId).collection("fees").doc(feeId);
-      const feeSnap = await feeRef.get();
+      const feePath = `schools/${schoolId}/fees/${feeId}`;
+      const feeData = await getDocument(feePath);
 
-      if (feeSnap.exists) {
-        const feeData = feeSnap.data()!;
-        const paidAmount = Number(statusData.amount || 0);
-        const newPaid = (feeData.amountPaid || 0) + paidAmount;
+      if (feeData) {
+        const paidAmount = Number(statusData.amount);
+        if (!paidAmount || isNaN(paidAmount) || paidAmount <= 0) {
+          throw new Error(`Invalid payment amount received: ${statusData.amount}`);
+        }
+        const newPaid = Number(feeData.amountPaid || 0) + paidAmount;
         const termFee = Number(feeData.termFee || 0);
         const newBalance = Math.max(0, termFee - newPaid);
         const newStatus = newBalance <= 0 ? "paid" : (newPaid > 0 ? "partial" : "unpaid");
 
-        await feeRef.update({
+        await patchDocument(feePath, {
           amountPaid: newPaid,
           balance: newBalance,
           status: newStatus,
-          lastPayment: new Date().toLocaleDateString("en-UG", { day: "2-digit", month: "short" }),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          lastPaymentAt: now,
+          updatedAt: now,
+        });
+
+        const txId = "tx-" + Date.now() + "-" + Math.random().toString(36).substring(2, 8);
+        await setDocument(`schools/${schoolId}/transactions/${txId}`, {
+          orderTrackingId,
+          merchantReference,
+          feeId,
+          studentId: feeData.studentId,
+          studentName: feeData.studentName,
+          amount: paidAmount,
+          currency: "UGX",
+          method: "Pesapal",
+          status: "completed",
+          processedAt: now,
         });
       }
 
       // Update session
-      await adminDb.collection("schools").doc(schoolId).collection("paymentSessions").doc(merchantReference).update({
+      await patchDocument(sessionPath, {
         status: "completed",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: now,
       });
 
       return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/payment-success?ref=${merchantReference}`);
     } else {
       // Update session to failed
-      await adminDb.collection("schools").doc(schoolId).collection("paymentSessions").doc(merchantReference).update({
+      await patchDocument(sessionPath, {
         status: "failed",
         error: paymentStatus,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: now,
       });
       return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/payment-failed?ref=${merchantReference}&status=${paymentStatus}`);
     }
 
-  } catch (error: any) {
-    console.error("Pesapal Callback Error:", error);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("Pesapal Callback Error:", message);
     return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/payment-failed?error=internal_error`);
   }
 }

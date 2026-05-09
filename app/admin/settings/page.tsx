@@ -31,7 +31,10 @@ const MOCK_FEE_STRUCTURE = [
   { level: "Senior 5 & 6", classes: "S.5A, S.5B, S.6A, S.6B", amount: 950000 },
 ];
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function AdminSettingsPage() {
+  useAuthGuard('admin');
   const { schoolId, schoolName, adminName } = useSchoolData();
   const [activeTab, setActiveTab] = useState(0);
   const [schoolCode, setSchoolCode] = useState("Loading...");

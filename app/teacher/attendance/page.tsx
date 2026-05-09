@@ -98,7 +98,10 @@ function TopAppBar({ initials }: { initials: string }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function TeacherAttendancePage() {
+  useAuthGuard('teacher');
   const router = useRouter();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [activeClass, setActiveClass] = useState<string>("");

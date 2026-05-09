@@ -54,3 +54,24 @@ export function setIpnId(id: string) {
 export function getIpnId(): string | null {
   return cachedIpnId;
 }
+
+export async function getOrLoadIpnId(): Promise<string | null> {
+  // Return cached value if available
+  if (cachedIpnId) return cachedIpnId;
+
+  // Try to load from Firestore
+  try {
+    const { getDocument } = await import("@/lib/firestore-rest");
+    const doc = await getDocument("config/pesapal");
+    if (doc) {
+      const id = doc.ipn_id;
+      if (id && typeof id === "string") {
+        cachedIpnId = id;
+        return cachedIpnId;
+      }
+    }
+  } catch {
+    // Firestore unavailable — will re-register on next submission
+  }
+  return null;
+}

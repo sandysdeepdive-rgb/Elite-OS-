@@ -14,6 +14,7 @@ import { collection, query, where, getDocs, doc, getDoc, setDoc, serverTimestamp
 import { db } from "@/lib/firebase/config";
 import { getTermFee, DEFAULT_FEE_STRUCTURE, FeeStructure } from "@/lib/fees";
 import Link from "next/link";
+import { useAuthGuard } from "@/lib/hooks/useAuthGuard";
 
 interface Student {
   id: string;
@@ -29,6 +30,7 @@ interface FeeRecord {
 }
 
 export default function FeeInitializationPage() {
+  useAuthGuard("admin");
   const { schoolId } = useSchoolData();
   const [term, setTerm] = useState("Term 1");
   const [year, setYear] = useState(new Date().getFullYear().toString());
@@ -44,20 +46,37 @@ export default function FeeInitializationPage() {
   useEffect(() => {
     if (!schoolId) return;
     const fetchFeeStructure = async () => {
-      const settingsDoc = await getDoc(doc(db, "schools", schoolId, "settings", "general"));
-      if (settingsDoc.exists()) {
-        const data = settingsDoc.data();
-        if (data.feeStructure && Array.isArray(data.feeStructure)) {
+      try {
+        const feeDoc = await getDoc(doc(db, "schools", schoolId, "settings", "feeStructure"));
+        const generalDoc = await getDoc(doc(db, "schools", schoolId, "settings", "general"));
+
+        if (feeDoc.exists()) {
+          const data = feeDoc.data();
           setFeeStructure({
-            senior1_2: data.feeStructure.find((t: any) => t.level.includes("1 & 2"))?.amount || DEFAULT_FEE_STRUCTURE.senior1_2,
-            senior3_4: data.feeStructure.find((t: any) => t.level.includes("3 & 4"))?.amount || DEFAULT_FEE_STRUCTURE.senior3_4,
-            senior5_6: data.feeStructure.find((t: any) => t.level.includes("5 & 6"))?.amount || DEFAULT_FEE_STRUCTURE.senior5_6,
+            senior1_2: data.senior1_2 || DEFAULT_FEE_STRUCTURE.senior1_2,
+            senior3_4: data.senior3_4 || DEFAULT_FEE_STRUCTURE.senior3_4,
+            senior5_6: data.senior5_6 || DEFAULT_FEE_STRUCTURE.senior5_6,
           });
+        } else if (generalDoc.exists()) {
+          const data = generalDoc.data();
+          if (data.feeStructure && Array.isArray(data.feeStructure)) {
+            setFeeStructure({
+              senior1_2: data.feeStructure.find((t: { level: string; amount: number }) => t.level.includes("1 & 2"))?.amount || DEFAULT_FEE_STRUCTURE.senior1_2,
+              senior3_4: data.feeStructure.find((t: { level: string; amount: number }) => t.level.includes("3 & 4"))?.amount || DEFAULT_FEE_STRUCTURE.senior3_4,
+              senior5_6: data.feeStructure.find((t: { level: string; amount: number }) => t.level.includes("5 & 6"))?.amount || DEFAULT_FEE_STRUCTURE.senior5_6,
+            });
+          }
         }
-        if (data.termSettings) {
-           setTerm(data.termSettings.currentTerm || "Term 1");
-           setYear(data.termSettings.academicYear || new Date().getFullYear().toString());
+
+        if (generalDoc.exists()) {
+          const data = generalDoc.data();
+          if (data.termSettings) {
+             setTerm(data.termSettings.currentTerm || "Term 1");
+             setYear(data.termSettings.academicYear || new Date().getFullYear().toString());
+          }
         }
+      } catch {
+        toast.error("Could not load fee structure. Using default values.");
       }
     };
     fetchFeeStructure();
@@ -98,7 +117,7 @@ export default function FeeInitializationPage() {
       for (const chunk of chunks) {
         await Promise.all(chunk.map(async (student) => {
           // Use deterministic ID to prevent duplicates for same term/year/student
-          const feeId = `${student.id}-${term.replace(/\s+/g, "")}-${year}`;
+          const feeId = `${student.id}__${term.replace(/\s+/g, "")}__${year}`;
           await setDoc(doc(db, "schools", schoolId, "fees", feeId), {
             studentId: student.id,
             studentName: student.name,
@@ -117,12 +136,18 @@ export default function FeeInitializationPage() {
       }
       
       toast.success(`${createdCount} fee records created for ${term}, ${year}`);
-    } catch (err) {
-      console.error("Batch creation failed:", err);
-      toast.error("Some records failed to generate. Please try again.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      console.error("Batch creation error:", message);
+      toast.error(
+        createdCount > 0
+          ? `${createdCount} of ${toCreate.length} records created. Some failed — please try again.`
+          : "Fee record generation failed. Please try again."
+      );
     } finally {
       setIsGenerating(false);
-      setProgress(0);
+      // Small delay so user sees 100% before it resets
+      setTimeout(() => setProgress(0), 1500);
     }
   };
 
@@ -193,6 +218,21 @@ export default function FeeInitializationPage() {
               </div>
             </div>
           </GlassCard>
+
+          {!studentsLoading && students.length === 0 && (
+            <GlassCard padding="p-12">
+              <div className="flex flex-col items-center text-center gap-4">
+                <span className="material-symbols-outlined text-[48px] text-outline">group_off</span>
+                <h3 className="font-headline text-xl font-light text-on-surface">No students registered yet</h3>
+                <p className="font-body text-sm text-on-surface-variant max-w-sm">
+                  Add students to the registry before initialising fee records.
+                </p>
+                <Link href="/admin/students">
+                  <EliteButton variant="outlined">Go to Student Registry</EliteButton>
+                </Link>
+              </div>
+            </GlassCard>
+          )}
 
           {/* Section 3: Preview Table */}
           <GlassCard padding="p-0 overflow-hidden">

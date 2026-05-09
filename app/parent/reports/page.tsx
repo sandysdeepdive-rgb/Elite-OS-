@@ -4,6 +4,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import BottomNavBar, { PARENT_NAV_ITEMS } from "@/components/layout/BottomNavBar";
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
 import CollectionErrorBanner from "@/components/ui/CollectionErrorBanner";
 import { useParentData } from "@/lib/hooks/useParentData";
 import { useChildCollection } from "@/lib/hooks/useSchoolData";
@@ -98,6 +99,7 @@ function CustomTopAppBar({ initials }: { initials: string }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ParentReportsPage() {
+  useAuthGuard('parent');
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<"report"|"analysis">("report");
 

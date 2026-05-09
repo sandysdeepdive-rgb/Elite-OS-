@@ -30,7 +30,10 @@ interface Message {
   isMe: boolean;
 }
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function AdminMessagesPage() {
+  useAuthGuard('admin');
   const { schoolId, schoolName, adminName } = useSchoolData();
   const { data: chats, loading: chatsLoading, error: chatsError } = useChatCollection<Chat>(schoolId, auth.currentUser?.uid || null);
   

@@ -95,7 +95,10 @@ function CustomTopAppBar({ initials }: { initials: string }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function TeacherMessagesPage() {
+  useAuthGuard('teacher');
   const router = useRouter();
   const { teacherProfile } = useTeacherData();
   

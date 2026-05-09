@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { Search, Send, ChevronLeft, MessageSquare } from "lucide-react";
 import BottomNavBar, { PARENT_NAV_ITEMS } from "@/components/layout/BottomNavBar";
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
 import { useParentData } from "@/lib/hooks/useParentData";
 import { useChatCollection, useCollection } from "@/lib/hooks/useSchoolData";
 import { collection, addDoc, serverTimestamp, doc, updateDoc } from "firebase/firestore";
@@ -94,6 +95,7 @@ function CustomTopAppBar({ initials }: { initials: string }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ParentMessagesPage() {
+  useAuthGuard('parent');
   const router = useRouter();
   const [activeContactId, setActiveContactId] = useState<string | null>(null);
   const [showConversation, setShowConversation] = useState(false); // mobile only

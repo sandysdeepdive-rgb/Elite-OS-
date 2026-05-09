@@ -1,203 +1,244 @@
 rules_version = '2';
 
-// FIRESTORE INDEX REQUIRED: fees collection — composite index on (term ASC, academicYear ASC)
-// Create at: https://console.firebase.google.com/project/{PROJECT_ID}/firestore/indexes
+// FIRESTORE INDEX REQUIRED: fees — composite index (term ASC, academicYear ASC)
+// FIRESTORE INDEX REQUIRED: fees — composite index (studentId ASC, term ASC)
+// Create at: https://console.firebase.google.com/project/elite-is/firestore/indexes
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 0. Global Safety Net
+    // DEFAULT DENY
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // --- Phase 3: Primitive Definitions ---
-    
+    // ── HELPERS ──────────────────────────────────────
+
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    // Get current user document data
     function currentUserData() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    function userExists() {
-      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
-    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
 
-    // Role and Status checks
-    function isStatusActive(user) {
+    function isApproved(user) {
       return user.status == 'approved';
     }
 
     function isAdmin(schoolId) {
-      let user = currentUserData();
-      return isAuthenticated() && user.role == 'admin' && user.schoolId == schoolId && isStatusActive(user);
+      let u = currentUserData();
+      return isAuthenticated() && u.role == 'admin' && u.schoolId == schoolId && isApproved(u);
     }
 
     function isTeacher(schoolId) {
-      let user = currentUserData();
-      return isAuthenticated() && user.role == 'teacher' && user.schoolId == schoolId && isStatusActive(user);
+      let u = currentUserData();
+      return isAuthenticated() && u.role == 'teacher' && u.schoolId == schoolId && isApproved(u);
     }
 
     function isParent(schoolId) {
-      let user = currentUserData();
-      return isAuthenticated() && user.role == 'parent' && user.schoolId == schoolId && isStatusActive(user);
+      let u = currentUserData();
+      return isAuthenticated() && u.role == 'parent' && u.schoolId == schoolId && isApproved(u);
     }
 
     function belongsToSchool(schoolId) {
-      let user = currentUserData();
-      return isAuthenticated() && user.schoolId == schoolId && isStatusActive(user);
+      let u = currentUserData();
+      return isAuthenticated() && u.schoolId == schoolId && isApproved(u);
     }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
-    }
-
-    // --- Validation Helpers ---
 
     function isValidUser(data) {
-      return data.keys().hasAll(['role', 'schoolId', 'email', 'status']) &&
-             data.role in ['admin', 'teacher', 'parent'] &&
-             data.schoolId is string &&
-             data.email is string &&
-             data.status in ['approved', 'pending', 'rejected'];
+      return data.keys().hasAll(['role', 'schoolId', 'email', 'status', 'name'])
+        && data.role in ['admin', 'teacher', 'parent']
+        && data.schoolId is string
+        && data.email is string
+        && data.status in ['approved', 'pending', 'rejected'];
     }
 
     function isValidStudent(data) {
-      return data.keys().hasAll(['name', 'class', 'id', 'createdAt']) &&
-             data.name is string && data.name.size() <= 100 &&
-             data.class is string && data.class.size() <= 20;
+      return data.keys().hasAll(['name', 'class', 'createdAt'])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.class is string && data.class.size() > 0 && data.class.size() <= 20;
     }
 
     function isValidFee(data) {
-      return data.keys().hasAll(['studentId', 'studentName', 'termFee', 'amountPaid', 'balance', 'status', 'term', 'academicYear', 'createdAt']) &&
-             data.studentId is string &&
-             data.termFee is number && data.termFee >= 0 &&
-             data.amountPaid is number && data.amountPaid >= 0 &&
-             data.balance is number &&
-             data.status in ['paid', 'partial', 'unpaid'];
+      return data.keys().hasAll(['studentId','studentName','termFee','amountPaid','balance','status','term','academicYear','createdAt'])
+        && data.studentId is string
+        && data.termFee is number && data.termFee >= 0
+        && data.amountPaid is number && data.amountPaid >= 0
+        && data.balance is number
+        && data.status in ['paid', 'partial', 'unpaid'];
     }
 
-    // --- Collection Matches ---
-
-    // 1. Users
+    // ── USERS ────────────────────────────────────────
     match /users/{userId} {
-      allow read: if isAuthenticated() && (request.auth.uid == userId || (isAdmin(currentUserData().schoolId)));
-      allow create: if isAuthenticated() && request.auth.uid == userId && isValidUser(incoming());
-      allow update: if isAuthenticated() && (
-        request.auth.uid == userId || isAdmin(incoming().schoolId)
-      );
+      // Read own document only
+      // Admin reads scoped via server-side API — not client rules
+      allow get: if isAuthenticated() && request.auth.uid == userId;
+      allow list: if false;
+
+      // Self-registration — cannot assign admin role, must start as pending
+      allow create: if isAuthenticated()
+        && request.auth.uid == userId
+        && isValidUser(incoming())
+        && incoming().role != 'admin'
+        && incoming().status == 'pending';
+
+      // Self-update — only safe profile fields, cannot change role/status/schoolId
+      allow update: if isAuthenticated()
+        && request.auth.uid == userId
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'updatedAt'])
+        && incoming().role == existing().role
+        && incoming().status == existing().status
+        && incoming().schoolId == existing().schoolId;
+
+      allow delete: if false;
     }
 
-    // 2. Schools
+    // ── SCHOOLS ──────────────────────────────────────
     match /schools/{schoolId} {
-      // Basic school info is readable for registration/validation
-      allow get: if isAuthenticated();
-      allow list: if isAuthenticated();
-      allow create: if isAuthenticated();
+      // Only read your own school — never list all schools
+      allow get: if isAuthenticated() && currentUserData().schoolId == schoolId;
+      allow list: if false;
+      allow create: if false; // Server-side only via /api/auth/register-admin
       allow update: if isAdmin(schoolId);
+      allow delete: if false;
 
-      // Subcollections
-      
-      // Settings
+      // SETTINGS
       match /settings/{settingId} {
         allow read: if belongsToSchool(schoolId);
         allow write: if isAdmin(schoolId);
       }
 
-      // Students
+      // STUDENTS
       match /students/{studentId} {
-        allow get: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && existing().parentUid == request.auth.uid);
-        allow list: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && resource.data.parentUid == request.auth.uid);
-        allow create: if isAdmin(schoolId); // Removed isValidStudent for flexibility during import
-        allow update: if isAdmin(schoolId) || (isParent(schoolId) && existing().parentUid == request.auth.uid); 
+        allow get: if isAdmin(schoolId) || isTeacher(schoolId)
+          || (isParent(schoolId) && existing().parentUid == request.auth.uid);
+        // Parents cannot list all students — scope query client-side
+        allow list: if isAdmin(schoolId) || isTeacher(schoolId);
+        allow create: if isAdmin(schoolId) && isValidStudent(incoming());
+        // Only update safe fields — fee status managed by fee system
+        allow update: if isAdmin(schoolId)
+          && incoming().diff(existing()).affectedKeys()
+            .hasOnly(['name','class','parentContact','parentName','dateOfBirth','gender','updatedAt']);
         allow delete: if isAdmin(schoolId);
       }
 
-      // Teachers
+      // TEACHERS
       match /teachers/{teacherId} {
         allow read: if belongsToSchool(schoolId);
         allow write: if isAdmin(schoolId);
       }
 
-      // Classes
+      // CLASSES
       match /classes/{classId} {
         allow read: if belongsToSchool(schoolId);
         allow write: if isAdmin(schoolId);
       }
 
-      // Fees
+      // FEES
+      // Parent fee updates come from server-side Pesapal callback ONLY
+      // No client-side fee writes permitted for any role except admin
       match /fees/{feeId} {
-        allow get: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && existing().studentId == currentUserData().linkedId);
-        allow list: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && resource.data.studentId == currentUserData().linkedId);
-        allow write: if isAdmin(schoolId);
-        allow update: if isParent(schoolId) && existing().studentId == currentUserData().linkedId && incoming().diff(existing()).affectedKeys().hasOnly(['amountPaid', 'balance', 'status']);
+        allow get: if isAdmin(schoolId) || isTeacher(schoolId)
+          || (isParent(schoolId) && existing().studentId == currentUserData().linkedId);
+        // Parents query fees client-side using where("studentId","==",linkedId)
+        allow list: if isAdmin(schoolId) || isTeacher(schoolId) || isParent(schoolId);
+        allow create: if isAdmin(schoolId) && isValidFee(incoming());
+        allow update: if isAdmin(schoolId);
+        allow delete: if isAdmin(schoolId);
       }
 
-      // Reports
+      // REPORTS
       match /reports/{reportId} {
-        allow get: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && existing().studentId == currentUserData().linkedId);
-        allow list: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && resource.data.studentId == currentUserData().linkedId);
+        allow get: if isAdmin(schoolId) || isTeacher(schoolId)
+          || (isParent(schoolId) && existing().studentId == currentUserData().linkedId);
+        allow list: if isAdmin(schoolId) || isTeacher(schoolId);
         allow create, update: if isAdmin(schoolId) || isTeacher(schoolId);
         allow delete: if isAdmin(schoolId);
       }
 
-      // Attendance
+      // ATTENDANCE
       match /attendance/{attendanceId} {
-        allow get: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && existing().studentId == currentUserData().linkedId);
-        allow list: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && resource.data.studentId == currentUserData().linkedId);
-        allow create, update: if isAdmin(schoolId) || isTeacher(schoolId);
+        allow get: if isAdmin(schoolId) || isTeacher(schoolId)
+          || (isParent(schoolId) && existing().studentId == currentUserData().linkedId);
+        allow list: if isAdmin(schoolId) || isTeacher(schoolId);
+        // Teacher can only write records they own
+        allow create, update: if isAdmin(schoolId)
+          || (isTeacher(schoolId) && incoming().teacherId == request.auth.uid);
         allow delete: if isAdmin(schoolId);
       }
 
-      // Timetable
+      // TIMETABLE
       match /timetable/{timetableId} {
         allow read: if belongsToSchool(schoolId);
         allow write: if isAdmin(schoolId) || isTeacher(schoolId);
       }
 
-      // Chats
+      // CHATS
       match /chats/{chatId} {
         allow get: if belongsToSchool(schoolId) && request.auth.uid in existing().participants;
-        allow list: if belongsToSchool(schoolId) && request.auth.uid in resource.data.participants;
-        allow create: if belongsToSchool(schoolId) && request.auth.uid in incoming().participants;
-        allow update: if belongsToSchool(schoolId) && request.auth.uid in existing().participants && incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'time', 'unread', 'updatedAt']);
+        allow list: if false;
+        allow create: if belongsToSchool(schoolId)
+          && request.auth.uid in incoming().participants
+          && incoming().participants.size() >= 2;
+        allow update: if belongsToSchool(schoolId)
+          && request.auth.uid in existing().participants
+          && incoming().diff(existing()).affectedKeys()
+            .hasOnly(['lastMessage', 'time', 'unread', 'updatedAt']);
+        allow delete: if false;
 
         match /messages/{messageId} {
-          allow read: if belongsToSchool(schoolId) && request.auth.uid in get(/databases/$(database)/documents/schools/$(schoolId)/chats/$(chatId)).data.participants;
-          allow create: if belongsToSchool(schoolId) && request.auth.uid == incoming().senderId && request.auth.uid in get(/databases/$(database)/documents/schools/$(schoolId)/chats/$(chatId)).data.participants;
+          allow read: if belongsToSchool(schoolId)
+            && request.auth.uid in get(/databases/$(database)/documents/schools/$(schoolId)/chats/$(chatId)).data.participants;
+          allow create: if belongsToSchool(schoolId)
+            && request.auth.uid == incoming().senderId
+            && request.auth.uid in get(/databases/$(database)/documents/schools/$(schoolId)/chats/$(chatId)).data.participants;
+          allow update, delete: if false;
         }
       }
 
-      // Pending Users
+      // PENDING USERS
       match /pendingUsers/{userId} {
         allow create: if isAuthenticated() && request.auth.uid == userId;
         allow read, delete: if isAdmin(schoolId);
+        allow update: if false;
       }
 
-      // Payment Sessions (Pesapal)
+      // PAYMENT SESSIONS — server-side write only
       match /paymentSessions/{sessionId} {
-        allow read: if isAdmin(schoolId) || isTeacher(schoolId);
-        allow write: if false; // Only via Cloud Functions/Server
+        allow read: if isAdmin(schoolId);
+        allow write: if false;
       }
 
-      // Transactions
+      // TRANSACTIONS — immutable after creation
       match /transactions/{txnId} {
-        allow get: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && existing().studentId == currentUserData().linkedId);
-        allow list: if isAdmin(schoolId) || isTeacher(schoolId) || (isParent(schoolId) && resource.data.studentId == currentUserData().linkedId);
-        allow write: if isAdmin(schoolId);
+        allow get: if isAdmin(schoolId) || isTeacher(schoolId)
+          || (isParent(schoolId) && existing().studentId == currentUserData().linkedId);
+        allow list: if isAdmin(schoolId) || isTeacher(schoolId);
+        allow create: if isAdmin(schoolId);
+        allow update, delete: if false;
+      }
+
+      // ANNOUNCEMENTS
+      match /announcements/{id} {
+        allow read: if belongsToSchool(schoolId);
+        allow create, update: if isAdmin(schoolId) || isTeacher(schoolId);
+        allow delete: if isAdmin(schoolId);
+      }
+
+      // NOTIFICATIONS
+      match /notifications/{id} {
+        allow read: if belongsToSchool(schoolId)
+          && existing().recipientUid == request.auth.uid;
+        allow create: if isAdmin(schoolId);
+        allow update: if belongsToSchool(schoolId)
+          && existing().recipientUid == request.auth.uid
+          && incoming().diff(existing()).affectedKeys().hasOnly(['read', 'readAt']);
+        allow delete: if false;
       }
     }
   }
 }
-

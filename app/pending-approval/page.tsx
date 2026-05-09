@@ -2,102 +2,114 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { signOut } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { doc, onSnapshot } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase/config";
 import EliteButton from "@/components/ui/EliteButton";
 
-export default function PendingApproval() {
+export default function PendingApprovalPage() {
   const router = useRouter();
   const [userName, setUserName] = useState("");
   const [userEmail, setUserEmail] = useState("");
+  const [status, setStatus] = useState<"pending" | "approved" | "rejected">("pending");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = auth.onAuthStateChanged((user) => {
-      if (user) {
-        setUserName(user.displayName || "User");
-        setUserEmail(user.email || "");
-      } else {
-        router.push("/");
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        router.replace("/");
+        return;
       }
-    });
-    return () => unsub();
-  }, [router]);
 
-  useEffect(() => {
-    const checkStatus = async () => {
-      if (!auth.currentUser) return;
-      const docRef = doc(db, "users", auth.currentUser.uid);
-      try {
-        const snap = await getDoc(docRef);
-        if (snap.exists()) {
-          const status = snap.data().status;
-          if (status === "approved") {
-            const role = snap.data().role;
-            const routes: Record<string, string> = {
-              admin: "/admin/dashboard",
-              teacher: "/teacher/dashboard",
-              parent: "/parent/dashboard",
-            };
-            router.push(routes[role] || "/");
-          } else if (status === "rejected") {
-            // Optional: Handle rejected state if needed.
-            // signOut(auth);
-            // router.push("/?error=rejected");
+      setUserEmail(user.email || "");
+      setUserName(user.displayName || "");
+
+      // Listen for status changes in real time
+      const unsubscribeDoc = onSnapshot(
+        doc(db, "users", user.uid),
+        (snap) => {
+          setLoading(false);
+          if (!snap.exists()) return;
+
+          const data = snap.data();
+          const currentStatus = data?.status;
+          setStatus(currentStatus);
+
+          if (currentStatus === "approved") {
+            const role = data?.role;
+            router.replace(`/${role}`);
           }
-        }
-      } catch (err) {
-        console.error(err);
-      }
-    };
+        },
+        () => setLoading(false)
+      );
 
-    const interval = setInterval(checkStatus, 30000); // 30s
-    checkStatus(); // Initial check
+      return () => unsubscribeDoc();
+    });
 
-    return () => clearInterval(interval);
+    return () => unsubscribeAuth();
   }, [router]);
 
   const handleSignOut = async () => {
     await signOut(auth);
-    router.push("/");
+    router.replace("/");
   };
 
-  return (
-    <div className="min-h-screen mesh-gradient flex items-center justify-center p-6 relative overflow-hidden font-body text-deep-charcoal">
-      {/* Background Decor */}
-      <div className="fixed inset-0 -z-10 bg-cloud">
-        <div className="absolute top-0 left-0 w-full h-full opacity-30 grain-overlay"></div>
-        <div className="absolute top-[-20%] right-[-10%] w-[800px] h-[800px] bg-petrol/5 rounded-full blur-[150px]"></div>
+  if (loading) {
+    return (
+      <div className="min-h-screen mesh-gradient-bg flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
       </div>
+    );
+  }
 
-      <main className="w-full max-w-lg bg-white/90 backdrop-blur-xl rounded-[40px] shadow-[0_32px_64px_rgba(20,20,22,0.08)] p-12 text-center border border-white/20 relative z-10">
-        <div className="mx-auto w-20 h-20 bg-petrol/10 rounded-full flex items-center justify-center mb-8">
-          <span className="material-symbols-outlined text-[40px] text-petrol">
-            hourglass_empty
-          </span>
+  return (
+    <div className="min-h-screen mesh-gradient-bg flex items-center justify-center p-6">
+      <div className="max-w-md w-full text-center space-y-6">
+
+        {status === "rejected" ? (
+          <>
+            <div className="w-20 h-20 bg-error/10 rounded-full flex items-center justify-center mx-auto">
+              <span className="material-symbols-outlined text-error text-4xl">cancel</span>
+            </div>
+            <h1 className="font-headline text-4xl font-light text-on-surface">
+              Registration Declined
+            </h1>
+            <p className="font-body text-on-surface-variant text-base leading-relaxed">
+              Your registration has been declined by the school administrator.
+              Please contact your school directly for assistance.
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="w-20 h-20 bg-primary-container/20 rounded-full flex items-center justify-center mx-auto">
+              <span className="material-symbols-outlined text-primary text-4xl">hourglass_top</span>
+            </div>
+            <h1 className="font-headline text-4xl font-light text-on-surface">
+              Application Submitted
+            </h1>
+            <p className="font-body text-on-surface-variant text-base leading-relaxed">
+              Your account is pending approval from your school administrator.
+              You will be redirected automatically once approved.
+            </p>
+            {userName && (
+              <p className="font-body text-sm text-outline">{userName}</p>
+            )}
+            {userEmail && (
+              <p className="font-body text-sm text-outline">{userEmail}</p>
+            )}
+            <div className="flex items-center justify-center gap-2 text-xs text-outline">
+              <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
+              Waiting for administrator approval
+            </div>
+          </>
+        )}
+
+        <div className="pt-4">
+          <EliteButton variant="outlined" onClick={handleSignOut}>
+            Sign Out
+          </EliteButton>
         </div>
-
-        <h1 className="font-headline text-4xl text-petrol tracking-tight mb-4">
-          Application Submitted
-        </h1>
-
-        <p className="text-deep-charcoal/70 font-light leading-relaxed mb-8">
-          Your account is pending approval from your school administrator. You&apos;ll be able to log in once approved. This usually takes less than 24 hours.
-        </p>
-
-        <div className="bg-cloud p-6 rounded-2xl mb-8 border border-outline-variant/10">
-          <p className="font-medium text-petrol mb-1">{userName}</p>
-          <p className="text-sm text-deep-charcoal/60 font-mono tracking-wide">{userEmail}</p>
-        </div>
-
-        <EliteButton
-          onClick={handleSignOut}
-          variant="outlined"
-          className="w-full h-14 tracking-widest text-xs uppercase"
-        >
-          Sign Out
-        </EliteButton>
-      </main>
+      </div>
     </div>
   );
 }

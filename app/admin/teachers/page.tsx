@@ -27,7 +27,10 @@ interface Teacher {
   status: "approved" | "pending";
 }
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function AdminTeachers() {
+  useAuthGuard('admin');
   const { schoolId, schoolName, adminName } = useSchoolData();
   const { data: teachers, loading, error: teachersError } = useCollection<Teacher>(schoolId, "teachers");
 

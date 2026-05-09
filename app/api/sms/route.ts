@@ -7,7 +7,7 @@ const AT_BASE_URL = process.env.NODE_ENV === "production"
   ? "https://api.africastalking.com/version1/messaging"
   : "https://api.sandbox.africastalking.com/version1/messaging";
 
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { getDocument } from "@/lib/firestore-rest";
 
 // Verify User and Role
 async function verifyUserAndRole(req: NextRequest) {
@@ -16,17 +16,31 @@ async function verifyUserAndRole(req: NextRequest) {
     if (!authHeader?.startsWith("Bearer ")) return null;
 
     const token = authHeader.split(" ")[1];
-    const decodedToken = await adminAuth.verifyIdToken(token);
-    const uid = decodedToken.uid;
+    
+    // Verify token using Firebase Auth REST API
+    const authRes = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken: token }),
+      }
+    );
+    
+    if (!authRes.ok) return null;
+    const authData = await authRes.json();
+    if (!authData.users || authData.users.length === 0) return null;
+    
+    const uid = authData.users[0].localId;
 
-    // Check role in Firestore
-    const userDoc = await adminDb.collection("users").doc(uid).get();
-    if (!userDoc.exists) return null;
+    // Check role in Firestore using REST API
+    const profile = await getDocument(`users/${uid}`);
+    if (!profile) return null;
 
-    const profile = userDoc.data();
-    if (profile?.status !== "approved") return null;
+    const status = (profile?.status as string)?.toLowerCase().trim();
+    if (status !== "approved") return null;
 
-    return { uid, role: profile?.role, schoolId: profile?.schoolId };
+    return { uid, role: profile?.role as string, schoolId: profile?.schoolId as string };
   } catch (error) {
     console.error("Auth verification failed:", error);
     return null;

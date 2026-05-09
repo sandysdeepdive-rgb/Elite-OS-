@@ -482,7 +482,10 @@ function ClassRow({
   );
 }
 
+import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+
 export default function TeacherGradesPage() {
+  useAuthGuard('teacher');
   const [activeTab, setActiveTab] = useState(0);
   const [saveCount, setSaveCount] = useState(0);
   const [saving, setSaving] = useState(false);
