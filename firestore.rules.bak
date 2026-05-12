@@ -6,6 +6,11 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    match /public_test/{doc} {
+      allow read: if true;
+    }
+
     // DEFAULT DENY
     match /{document=**} {
       allow read, write: if false;
@@ -107,17 +112,15 @@ service cloud.firestore {
 
     // ── SCHOOLS ──────────────────────────────────────
     match /schools/{schoolId} {
-      allow get: if isServiceAccount() || (isAuthenticated() && currentUserData().schoolId == schoolId);
-      allow list: if true;
-      allow create: if isServiceAccount() || (isAuthenticated() && incoming().adminUid == request.auth.uid);
+      allow read: if true;
+      allow create: if isServiceAccount();
       allow update: if isAdmin(schoolId) || isServiceAccount();
       allow delete: if false;
 
       // SETTINGS
       match /settings/{settingId} {
         allow read: if belongsToSchool(schoolId) || isServiceAccount();
-        allow create: if isServiceAccount() || (isAuthenticated() && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
-        allow update, delete: if isAdmin(schoolId) || isServiceAccount();
+        allow write: if isAdmin(schoolId) || isServiceAccount();
       }
 
       // STUDENTS

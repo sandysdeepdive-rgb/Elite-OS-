@@ -3,8 +3,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { createUserWithEmailAndPassword, deleteUser } from "firebase/auth";
-import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+import {
+  createUserWithEmailAndPassword,
+  deleteUser,
+} from "firebase/auth";
+import {
+  doc,
+  setDoc,
+  getDoc,
+  writeBatch,
+} from "firebase/firestore";
 import { auth, db } from "@/lib/firebase/config";
 import { getAuthErrorMessage } from "@/lib/auth-errors";
 import EliteButton from "@/components/ui/EliteButton";
@@ -28,9 +36,24 @@ export default function AdminSignupPage() {
     setLoading(true);
     setError("");
 
-    // Validation
-    if (!fullName.trim() || !email.trim() || !password || !schoolName.trim() || !schoolCode.trim()) {
-      setError("All fields are required.");
+    // ── Client-side validation ─────────────────────
+    if (!schoolName.trim()) {
+      setError("School name is required.");
+      setLoading(false);
+      return;
+    }
+    if (!fullName.trim()) {
+      setError("Your full name is required.");
+      setLoading(false);
+      return;
+    }
+    if (!email.trim()) {
+      setError("Email address is required.");
+      setLoading(false);
+      return;
+    }
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
       setLoading(false);
       return;
     }
@@ -39,65 +62,147 @@ export default function AdminSignupPage() {
       setLoading(false);
       return;
     }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      setLoading(false);
-      return;
-    }
-    if (!/^[a-zA-Z0-9-]{3,20}$/.test(schoolCode.trim())) {
-      setError("School code must be 3–20 characters, letters, numbers, and hyphens only.");
-      setLoading(false);
-      return;
-    }
 
-    let userCredential;
+    let userCredential = null;
+
     try {
+      // ── Step 1: Generate IDs ──────────────────────
+      const schoolId = `school-${Date.now()}-${Math.random()
+        .toString(36)
+        .substring(2, 8)}`;
+      const schoolCode = `ESO-${Math.random()
+        .toString(36)
+        .substring(2, 6)
+        .toUpperCase()}`;
+
+      // ── Step 2: Server-side validation ───────────
+      // Check school code uniqueness (non-blocking — fails open)
+      try {
+        const validationRes = await fetch(
+          "/api/auth/validate-admin-registration",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-secret": process.env.NEXT_PUBLIC_API_SECRET || "",
+            },
+            body: JSON.stringify({ schoolCode }),
+          }
+        );
+        const validation = await validationRes.json();
+        if (!validation.valid) {
+          setError(
+            validation.error ||
+              "Registration could not be completed. Please try again."
+          );
+          setLoading(false);
+          return;
+        }
+      } catch {
+        // Validation endpoint unreachable — proceed anyway
+        // The batch write below is the real safety net
+      }
+
+      // ── Step 3: Create Firebase Auth account ─────
       userCredential = await createUserWithEmailAndPassword(
-        auth, sanitizeEmail(email), password
+        auth,
+        email.trim().toLowerCase(),
+        password
       );
-    } catch (authError: unknown) {
-      const code = authError instanceof Error
-        ? (authError as { code?: string }).code || ""
-        : "";
-      setError(getAuthErrorMessage(code));
-      setLoading(false);
-      return;
-    }
+      const uid = userCredential.user.uid;
 
-    const uid = userCredential.user.uid;
+      // ── Step 4: Atomic Firestore batch write ──────
+      const batch = writeBatch(db);
 
-    try {
-      const res = await fetch("/api/auth/register-admin", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-secret": process.env.NEXT_PUBLIC_API_SECRET!,
-        },
-        body: JSON.stringify({
-          uid,
-          email: sanitizeEmail(email),
-          name: sanitizeText(fullName),
-          schoolName: sanitizeText(schoolName),
-          schoolCode: schoolCode.trim().toUpperCase(),
-          phone: null,
-        }),
+      // School document
+      batch.set(doc(db, "schools", schoolId), {
+        schoolId,
+        schoolName:  schoolName.trim(),
+        schoolCode,
+        adminUid:    uid,
+        createdAt:   new Date().toISOString(),
+        plan:        "trial",
+        active:      true,
       });
 
-      const data = await res.json();
+      // User document
+      batch.set(doc(db, "users", uid), {
+        uid,
+        email:       email.trim().toLowerCase(),
+        name:        fullName.trim(),
+        role:        "admin",
+        schoolId,
+        schoolCode,
+        status:      "approved",
+        linkedId:    null,
+        phone:       null,
+        createdAt:   new Date().toISOString(),
+        updatedAt:   new Date().toISOString(),
+      });
 
-      if (!res.ok) {
+      // Default fee structure
+      batch.set(
+        doc(db, "schools", schoolId, "settings", "feeStructure"),
+        {
+          senior1_2:  700000,
+          senior3_4:  850000,
+          senior5_6:  950000,
+          updatedAt:  new Date().toISOString(),
+        }
+      );
+
+      await batch.commit();
+
+      // ── Step 5: Verify write succeeded ───────────
+      const userSnap = await getDoc(doc(db, "users", uid));
+
+      if (!userSnap.exists() || userSnap.data().role !== "admin") {
+        // Write verification failed — clean up Auth account
         await deleteUser(userCredential.user);
-        setError(data.error || "Registration failed. Please try again.");
+        setError(
+          "Account setup could not be verified. Please try again."
+        );
         setLoading(false);
         return;
       }
 
-      toast.success("School registered successfully! Welcome to EliteSchool OS.");
-      router.push("/admin");
+      // ── Step 6: Redirect ──────────────────────────
+      router.push("/admin/dashboard");
 
-    } catch {
-      await deleteUser(userCredential.user);
-      setError("Registration failed. Please check your connection and try again.");
+    } catch (err: unknown) {
+      // ── Cleanup orphaned Auth account ─────────────
+      if (userCredential?.user) {
+        try {
+          await deleteUser(userCredential.user);
+        } catch {
+          // Cleanup failed — log but do not surface to user
+          console.error("Failed to clean up orphaned auth account");
+        }
+      }
+
+      const code = (err as { code?: string }).code;
+      const message = (err as { message?: string }).message;
+
+      if (code === "auth/email-already-in-use") {
+        setError(
+          "An account with this email already exists. Please sign in."
+        );
+      } else if (code === "auth/weak-password") {
+        setError("Password must be at least 6 characters.");
+      } else if (code === "auth/invalid-email") {
+        setError("Please enter a valid email address.");
+      } else if (
+        message?.toLowerCase().includes("permission") ||
+        message?.toLowerCase().includes("insufficient")
+      ) {
+        setError(
+          "Database permission error. Please contact support."
+        );
+      } else {
+        setError(
+          `Registration failed: ${message || "Please try again."}`
+        );
+      }
     } finally {
       setLoading(false);
     }

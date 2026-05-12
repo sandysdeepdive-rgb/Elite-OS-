@@ -294,7 +294,7 @@ export default function LoginPage() {
             </label>
             <div className="relative">
               <input
-                className="w-full px-8 py-4 bg-cloud border-none rounded-pill text-sm font-light focus:ring-2 focus:ring-petrol/10 placeholder:text-outline-variant transition-all outline-none"
+                className="w-full px-8 py-4 bg-cloud border-none rounded-full text-sm font-light focus:ring-2 focus:ring-petrol/10 placeholder:text-outline-variant transition-all outline-none"
                 id="email"
                 name="email"
                 placeholder="e.g. name@example.com"
@@ -314,7 +314,7 @@ export default function LoginPage() {
             </label>
             <div className="relative">
               <input
-                className="w-full px-8 py-4 bg-cloud border-none rounded-pill text-sm font-light focus:ring-2 focus:ring-petrol/10 placeholder:text-outline-variant transition-all outline-none"
+                className="w-full px-8 py-4 bg-cloud border-none rounded-full text-sm font-light focus:ring-2 focus:ring-petrol/10 placeholder:text-outline-variant transition-all outline-none"
                 id="password"
                 name="password"
                 placeholder="••••••••"
@@ -336,7 +336,7 @@ export default function LoginPage() {
 
           <div className="pt-4">
             <button
-              className="w-full bg-petrol text-cloud rounded-pill py-4 px-6 text-sm font-medium tracking-[0.1em] uppercase shadow-xl shadow-petrol/20 hover:brightness-110 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-petrol text-cloud rounded-full py-4 px-6 text-sm font-medium tracking-[0.1em] uppercase shadow-xl shadow-petrol/20 hover:brightness-110 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               type="submit"
               disabled={loading}
             >
@@ -357,7 +357,7 @@ export default function LoginPage() {
         <button
           onClick={handleGoogleSignIn}
           disabled={loading}
-          className="w-full flex items-center justify-center gap-3 px-4 py-4 border border-petrol/10 rounded-pill bg-white hover:bg-cloud active:scale-[0.98] transition-all font-body text-sm text-petrol font-medium tracking-wide disabled:opacity-50"
+          className="w-full flex items-center justify-center gap-3 px-4 py-4 border border-petrol/10 rounded-full bg-white hover:bg-cloud active:scale-[0.98] transition-all font-body text-sm text-petrol font-medium tracking-wide disabled:opacity-50"
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24">
             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />

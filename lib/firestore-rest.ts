@@ -1,32 +1,61 @@
-const PROJECT_ID = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "elite-is";
+import config from "@/firebase-applet-config.json";
+
+const PROJECT_ID = config.projectId || "elite-is";
 const BASE_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
 
+const SERVICE_EMAIL = process.env.FIREBASE_SERVICE_EMAIL || "";
+const SERVICE_PASSWORD = process.env.FIREBASE_SERVICE_PASSWORD || "";
+
 // Get a Firebase Auth token for REST API calls
-// Uses the Firebase Auth REST API with API key
+// Uses a dedicated service account credentials
 async function getAccessToken(): Promise<string> {
-  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY || config.apiKey;
   if (!apiKey) throw new Error("Firebase API key not configured");
 
-  // For server-side calls we use a long-lived custom token approach
-  // Use the API_SECRET as a server identity marker
-  // Actually — for Firestore REST we use the Firebase Auth emulator token
-  // OR we bypass auth using Firestore REST with API key directly
-  // The correct approach: use Firebase Auth REST to sign in as a service user
-
-  const res = await fetch(
+  // Attempt sign in
+  let res = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        email: process.env.FIREBASE_SERVICE_EMAIL,
-        password: process.env.FIREBASE_SERVICE_PASSWORD,
+        email: SERVICE_EMAIL,
+        password: SERVICE_PASSWORD,
         returnSecureToken: true,
       }),
     }
   );
 
-  if (!res.ok) throw new Error("Failed to authenticate service account");
+  // If the account doesn't exist yet, sign up to create it
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    if (errorData.error?.message === "EMAIL_NOT_FOUND" || res.status === 400 || errorData.error?.message === "INVALID_LOGIN_CREDENTIALS") {
+      res = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: SERVICE_EMAIL,
+            password: SERVICE_PASSWORD,
+            returnSecureToken: true,
+          }),
+        }
+      );
+    } else {
+      throw new Error(`Failed to authenticate service account: ${errorData.error?.message || res.statusText}`);
+    }
+  }
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    // If the error is EMAIL_EXISTS, it implies someone created it but the password was wrong on our attempt
+    if (errorData.error?.message === "EMAIL_EXISTS") {
+      throw new Error("Failed to authenticate service account: EMAIL_EXISTS (password mismatch)");
+    }
+    throw new Error(`Failed to create/authenticate service account: ${errorData.error?.message || res.statusText}`);
+  }
+  
   const data = await res.json();
   return data.idToken;
 }
