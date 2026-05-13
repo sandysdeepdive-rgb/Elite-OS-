@@ -195,7 +195,7 @@ export default function TeacherTimetablePage() {
         <CustomTopAppBar initials={teacherInitials} />
         
         <main className="flex-1 px-6 py-8 max-w-5xl mx-auto w-full pt-28 space-y-8">
-          <CollectionErrorBanner error={error} />
+          <CollectionErrorBanner error={error ? error.message : null} />
           {/* Section 1 — Page header */}
           <div>
             <h1 className="text-5xl font-light text-[#2B4D5A]" style={{ fontFamily: "'Cormorant Garamond', serif" }}>
