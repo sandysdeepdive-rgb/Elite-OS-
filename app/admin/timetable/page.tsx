@@ -8,590 +8,684 @@ import GlassCard from "@/components/ui/GlassCard";
 import EliteButton from "@/components/ui/EliteButton";
 import EliteInput from "@/components/ui/EliteInput";
 import { useSchoolData } from "@/lib/hooks/useSchoolData";
+import { useAuthGuard } from "@/lib/hooks/useAuthGuard";
+import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
+import { db } from "@/lib/firebase/config";
+import { toast } from "sonner";
 
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
-
-const PERIODS = [
-  { time: "08:00", type: "lesson" },
-  { time: "09:00", type: "lesson" },
-  { time: "10:00", type: "lesson" },
-  { time: "BREAK", type: "break", label: "Short Break" },
-  { time: "11:00", type: "lesson" },
-  { time: "12:00", type: "lesson" },
-  { time: "LUNCH", type: "break", label: "Lunch Break" },
-  { time: "14:00", type: "lesson" },
-  { time: "15:00", type: "lesson" },
-  { time: "16:00", type: "lesson" },
-] as const;
-
-const MOCK_CLASSES_LIST = [
-  "S.1A", "S.1B", "S.2A", "S.2B",
-  "S.3A", "S.3B", "S.4A", "S.4B",
-  "S.5A", "S.5B", "S.6A", "S.6B",
-];
-
-const MOCK_TEACHERS_LIST = [
-  { id: "t1", name: "Mr. Ssemwogerere John", code: "01" },
-  { id: "t2", name: "Ms. Nakiganda Ruth", code: "02" },
-  { id: "t3", name: "Mr. Ochieng David", code: "03" },
-  { id: "t4", name: "Ms. Apio Christine", code: "04" },
-  { id: "t5", name: "Mr. Mugisha Robert", code: "05" },
-];
-
-interface TimetableEntry {
-  subject: string;
-  teacherCode: string;
-  room: string;
-  teacherId: string;
+interface TimetableConfig {
+  days: string[];
+  periods: Period[];
+  entries: TimetableEntry[];
+  updatedAt: string;
 }
 
-type TimetableData = Record<string, TimetableEntry>;
+interface Period {
+  id: string;
+  label: string;
+  startTime: string;
+  endTime: string;
+  isBreak: boolean;
+}
 
-const INITIAL_TIMETABLE: TimetableData = {
-  "S.4A-0-0": { subject: "ENG", teacherCode: "03", room: "Room 12", teacherId: "t3" },
-  "S.4A-0-1": { subject: "MATH", teacherCode: "02", room: "Room 8", teacherId: "t2" },
-  "S.4A-0-4": { subject: "PHY", teacherCode: "01", room: "Lab 1", teacherId: "t1" },
-  "S.4A-0-5": { subject: "BIO", teacherCode: "04", room: "Lab 2", teacherId: "t4" },
-  "S.4B-0-0": { subject: "MATH", teacherCode: "02", room: "Room 8", teacherId: "t2" },
-  "S.4B-0-1": { subject: "ENG", teacherCode: "03", room: "Room 12", teacherId: "t3" },
-  "S.5A-0-4": { subject: "PHY", teacherCode: "01", room: "Lab 1", teacherId: "t1" },
-  "S.5A-0-5": { subject: "CHEM", teacherCode: "05", room: "Lab 3", teacherId: "t5" },
+interface TimetableEntry {
+  id: string;
+  day: string;
+  periodId: string;
+  subject: string;
+  teacher: string;
+  class: string;
+  room: string;
+  colorTag: string;
+}
+
+const DEFAULT_TIMETABLE: TimetableConfig = {
+  days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+  periods: [
+    { id: crypto.randomUUID(), label: "Period 1", startTime: "08:00", endTime: "08:40", isBreak: false },
+    { id: crypto.randomUUID(), label: "Period 2", startTime: "08:40", endTime: "09:20", isBreak: false },
+    { id: crypto.randomUUID(), label: "Break",    startTime: "09:20", endTime: "09:40", isBreak: true  },
+    { id: crypto.randomUUID(), label: "Period 3", startTime: "09:40", endTime: "10:20", isBreak: false },
+    { id: crypto.randomUUID(), label: "Period 4", startTime: "10:20", endTime: "11:00", isBreak: false },
+    { id: crypto.randomUUID(), label: "Period 5", startTime: "11:00", endTime: "11:40", isBreak: false },
+    { id: crypto.randomUUID(), label: "Lunch",    startTime: "11:40", endTime: "12:20", isBreak: true  },
+    { id: crypto.randomUUID(), label: "Period 6", startTime: "12:20", endTime: "13:00", isBreak: false },
+    { id: crypto.randomUUID(), label: "Period 7", startTime: "13:00", endTime: "13:40", isBreak: false },
+  ],
+  entries: [],
+  updatedAt: new Date().toISOString()
 };
 
-import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+const COLOR_PRESETS = [
+  "#2B4D5A", "#B5A898", "#416371", "#72787b",
+  "#9abdcc", "#c3b6a5", "#141416", "#ba1a1a"
+];
+
+function hexToRgba(hex: string, alpha: number) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 export default function AdminTimetablePage() {
-  useAuthGuard('admin');
-  const { schoolId, schoolName, adminName, loading } = useSchoolData();
-  const [activeDay, setActiveDay] = useState(0);
-  const [timetable, setTimetable] = useState<TimetableData>(INITIAL_TIMETABLE);
-  const [addEntry, setAddEntry] = useState<{ cls: string; dayIndex: number; periodIndex: number } | null>(null);
-  const [editEntry, setEditEntry] = useState<{ cls: string; dayIndex: number; periodIndex: number; entry: TimetableEntry } | null>(null);
-  const [entryForm, setEntryForm] = useState({ subject: "", teacherId: "", teacherCode: "", room: "" });
-  const [showPublishModal, setShowPublishModal] = useState(false);
-  const [showCopyModal, setShowCopyModal] = useState(false);
-  const [copyTargetDay, setCopyTargetDay] = useState<number>(0);
+  useAuthGuard("admin");
+  const { schoolId, schoolName, loading } = useSchoolData();
 
-  const getTimetableEntry = (cls: string, day: number, period: number) =>
-    timetable[`${cls}-${day}-${period}`] || null;
+  const [timetable, setTimetable] = useState<TimetableConfig | null>(null);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [isLoadingClasses, setIsLoadingClasses] = useState(true);
+  
+  const [classesList, setClassesList] = useState<{ id: string; className: string }[]>([]);
+  const [teachersList, setTeachersList] = useState<{ id: string; name: string }[]>([]);
+  const [activeClassFilter, setActiveClassFilter] = useState("All");
 
-  const clearEntry = (cls: string, day: number, period: number) => {
-    setTimetable((prev) => {
-      const next = { ...prev };
-      delete next[`${cls}-${day}-${period}`];
-      return next;
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Edit Panel states
+  const [cellEdit, setCellEdit] = useState<{ day: string; periodId: string; entry: TimetableEntry | null } | null>(null);
+  const [cellForm, setCellForm] = useState<TimetableEntry>({
+    id: "", day: "", periodId: "", subject: "", teacher: "", class: "", room: "", colorTag: COLOR_PRESETS[0]
+  });
+
+  const [newDayForm, setNewDayForm] = useState("");
+  const [newPeriodForm, setNewPeriodForm] = useState({ label: "", startTime: "", endTime: "", isBreak: false });
+
+  useEffect(() => {
+    if (!schoolId) return;
+
+    const fetchData = async () => {
+      setIsLoadingClasses(true);
+      try {
+        // Fetch classes
+        const classSnap = await getDocs(collection(db, `schools/${schoolId}/classes`));
+        const classes = classSnap.docs.map(d => ({ id: d.id, className: d.data().className }));
+        setClassesList(classes);
+
+        // Fetch teachers
+        const teacherSnap = await getDocs(collection(db, `schools/${schoolId}/teachers`));
+        const teachers = teacherSnap.docs.map(d => ({ id: d.id, name: d.data().name }));
+        setTeachersList(teachers);
+
+        // Fetch timetable config
+        const docRef = doc(db, `schools/${schoolId}/timetable/config`);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists() && docSnap.data().updatedAt) {
+          setTimetable(docSnap.data() as TimetableConfig);
+        } else {
+          setTimetable(JSON.parse(JSON.stringify(DEFAULT_TIMETABLE)));
+        }
+      } catch (error) {
+        console.error("Error fetching timetable data:", error);
+        toast.error("Failed to load timetable data");
+      } finally {
+        setIsLoadingClasses(false);
+      }
+    };
+    fetchData();
+  }, [schoolId]);
+
+  const conflicts = (() => {
+    if (!timetable) return [];
+    const clashList: string[] = [];
+    timetable.days.forEach(day => {
+      timetable.periods.forEach(p => {
+        if (p.isBreak) return;
+        const entriesInSlot = timetable.entries.filter(e => e.day === day && e.periodId === p.id);
+        const teachersInSlot = entriesInSlot.map(e => e.teacher).filter(Boolean);
+        const distinctTeachers = new Set(teachersInSlot);
+        if (teachersInSlot.length !== distinctTeachers.size) {
+          // Find the duplicate teacher
+          const counts: Record<string, number> = {};
+          teachersInSlot.forEach(t => { counts[t] = (counts[t] || 0) + 1; });
+          Object.keys(counts).forEach(t => {
+            if (counts[t] > 1) {
+              const classesClashing = entriesInSlot.filter(e => e.teacher === t).map(e => e.class).join(" and ");
+              clashList.push(`${t} is double-booked on ${day} ${p.label} (${classesClashing})`);
+            }
+          });
+        }
+      });
+    });
+    return Array.from(new Set(clashList)); // Unique conflicts
+  })();
+
+  const handleSaveToFirestore = async () => {
+    if (!schoolId || !timetable) return;
+    setIsSaving(true);
+    const toastId = toast.loading("Saving timetable...");
+    
+    try {
+      const configRef = doc(db, `schools/${schoolId}/timetable/config`);
+      const updatedTimetable = { ...timetable, updatedAt: new Date().toISOString() };
+      await setDoc(configRef, updatedTimetable, { merge: true });
+      setTimetable(updatedTimetable);
+      setHasUnsavedChanges(false);
+      setIsEditMode(false);
+      toast.success("Timetable saved successfully", { id: toastId });
+    } catch (error) {
+      console.error("Failed to save timetable:", error);
+      toast.error("Failed to save. Your changes are preserved — try again.", { id: toastId });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleToggleEditMode = () => {
+    if (isEditMode && hasUnsavedChanges) {
+      toast("You have unsaved changes. Discard them?", {
+        action: {
+          label: "Discard",
+          onClick: () => {
+            setIsEditMode(false);
+            setHasUnsavedChanges(false);
+            // Re-fetch to discard
+            window.location.reload(); 
+          }
+        },
+        cancel: {
+          label: "Cancel",
+          onClick: () => {}
+        }
+      });
+      return;
+    }
+    setIsEditMode(!isEditMode);
+    setCellEdit(null);
+  };
+
+  // Grid Cell Operations
+  const handleCellClick = (day: string, periodId: string) => {
+    if (!isEditMode) return;
+    if (!timetable) return;
+
+    const existingEntry = timetable.entries.find(e => e.day === day && e.periodId === periodId && (activeClassFilter === "All" || e.class === activeClassFilter));
+    
+    setCellEdit({ day, periodId, entry: existingEntry || null });
+    if (existingEntry) {
+      setCellForm({ ...existingEntry });
+    } else {
+      setCellForm({
+        id: crypto.randomUUID(),
+        day,
+        periodId,
+        subject: "",
+        teacher: "",
+        class: activeClassFilter !== "All" ? activeClassFilter : "",
+        room: "",
+        colorTag: COLOR_PRESETS[0]
+      });
+    }
+  };
+
+  const handleSaveCell = () => {
+    if (!timetable) return;
+    if (!cellForm.subject || !cellForm.class) {
+      toast.error("Subject and Class are required.");
+      return;
+    }
+    const newEntries = [...timetable.entries];
+    if (cellEdit?.entry) {
+      const idx = newEntries.findIndex(e => e.id === cellEdit.entry!.id);
+      if (idx !== -1) newEntries[idx] = { ...cellForm };
+    } else {
+      newEntries.push({ ...cellForm });
+    }
+    setTimetable({ ...timetable, entries: newEntries });
+    setHasUnsavedChanges(true);
+    setCellEdit(null);
+  };
+
+  const handleDeleteEntry = (entryId: string) => {
+    toast("Are you sure you want to delete this lesson?", {
+      action: {
+        label: "Confirm",
+        onClick: () => {
+          if (!timetable) return;
+          setTimetable({ ...timetable, entries: timetable.entries.filter(e => e.id !== entryId) });
+          setHasUnsavedChanges(true);
+          setCellEdit(null);
+        }
+      },
+      cancel: { label: "Undo", onClick: () => {} }
     });
   };
 
-  const detectClash = (
-    teacherId: string,
-    dayIndex: number,
-    periodIndex: number,
-    excludeKey?: string
-  ): string | null => {
-    for (const [key, entry] of Object.entries(timetable)) {
-      if (key === excludeKey) continue;
-      const [, d, p] = key.split("-");
-      if (
-        entry.teacherId === teacherId &&
-        parseInt(d) === dayIndex &&
-        parseInt(p) === periodIndex
-      ) {
-        const [clashClass] = key.split("-");
-        return `CLASH DETECTED — TR-${entry.teacherCode} already assigned to ${clashClass} at this period`;
-      }
+  // Days Operations
+  const handleAddDay = () => {
+    if (!timetable || !newDayForm.trim()) return;
+    if (!timetable.days.includes(newDayForm.trim())) {
+      setTimetable({ ...timetable, days: [...timetable.days, newDayForm.trim()] });
+      setHasUnsavedChanges(true);
     }
-    return null;
+    setNewDayForm("");
   };
 
-  let clashWarning: string | null = null;
-  if (entryForm.teacherId) {
-    const target = addEntry || editEntry;
-    if (target) {
-      const excludeKey = editEntry
-        ? `${editEntry.cls}-${editEntry.dayIndex}-${editEntry.periodIndex}`
-        : undefined;
-      clashWarning = detectClash(
-        entryForm.teacherId,
-        target.dayIndex,
-        target.periodIndex,
-        excludeKey
-      );
+  const handleRemoveDay = (day: string) => {
+    if (!timetable) return;
+    setTimetable({
+      ...timetable,
+      days: timetable.days.filter(d => d !== day),
+      entries: timetable.entries.filter(e => e.day !== day)
+    });
+    setHasUnsavedChanges(true);
+  };
+
+  const setPresetDays = (preset: string[]) => {
+    if (!timetable) return;
+    setTimetable({
+      ...timetable,
+      days: preset,
+      entries: timetable.entries.filter(e => preset.includes(e.day))
+    });
+    setHasUnsavedChanges(true);
+  };
+
+  // Reordering Arrays
+  const moveItem = <T,>(list: T[], index: number, direction: 'up' | 'down') => {
+    const newList = [...list];
+    if (direction === 'up' && index > 0) {
+      const temp = newList[index];
+      newList[index] = newList[index - 1];
+      newList[index - 1] = temp;
+    } else if (direction === 'down' && index < list.length - 1) {
+      const temp = newList[index];
+      newList[index] = newList[index + 1];
+      newList[index + 1] = temp;
     }
+    return newList;
+  };
+
+  const handleMoveDay = (index: number, direction: 'up' | 'down') => {
+    if (!timetable) return;
+    setTimetable({ ...timetable, days: moveItem(timetable.days, index, direction) });
+    setHasUnsavedChanges(true);
+  };
+
+  const handleMovePeriod = (index: number, direction: 'up' | 'down') => {
+    if (!timetable) return;
+    setTimetable({ ...timetable, periods: moveItem(timetable.periods, index, direction) });
+    setHasUnsavedChanges(true);
+  };
+
+  // Periods Operations
+  const handleAddPeriod = () => {
+    if (!timetable || !newPeriodForm.label || !newPeriodForm.startTime || !newPeriodForm.endTime) {
+      toast.error("Please fill in all period fields");
+      return;
+    }
+    setTimetable({
+      ...timetable,
+      periods: [...timetable.periods, { ...newPeriodForm, id: crypto.randomUUID() }]
+    });
+    setHasUnsavedChanges(true);
+    setNewPeriodForm({ label: "", startTime: "", endTime: "", isBreak: false });
+  };
+
+  const handleRemovePeriod = (periodId: string) => {
+    if (!timetable) return;
+    const entriesInPeriod = timetable.entries.filter(e => e.periodId === periodId);
+    if (entriesInPeriod.length > 0) {
+      toast(`Deleting this period will remove ${entriesInPeriod.length} lessons. Confirm?`, {
+        action: {
+          label: "Confirm",
+          onClick: () => {
+            setTimetable({
+              ...timetable,
+              periods: timetable.periods.filter(p => p.id !== periodId),
+              entries: timetable.entries.filter(e => e.periodId !== periodId)
+            });
+            setHasUnsavedChanges(true);
+          }
+        },
+        cancel: { label: "Cancel", onClick: () => {} }
+      });
+    } else {
+      setTimetable({
+        ...timetable,
+        periods: timetable.periods.filter(p => p.id !== periodId)
+      });
+      setHasUnsavedChanges(true);
+    }
+  };
+
+  if (loading || isLoadingClasses || !timetable) {
+    return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
   }
 
-  const handleSaveEntry = () => {
-    if (!entryForm.subject || !entryForm.teacherId || clashWarning) return;
-    const target = addEntry || editEntry;
-    if (!target) return;
-    const key = `${target.cls}-${target.dayIndex}-${target.periodIndex}`;
-    setTimetable((prev) => ({
-      ...prev,
-      [key]: {
-        subject: entryForm.subject,
-        teacherCode: entryForm.teacherCode,
-        room: entryForm.room || "TBA",
-        teacherId: entryForm.teacherId,
-      },
-    }));
-    setAddEntry(null);
-    setEditEntry(null);
-    setEntryForm({ subject: "", teacherId: "", teacherCode: "", room: "" });
-  };
-
-  const handleCopyDay = () => {
-    if (copyTargetDay === activeDay) return;
-    
-    setTimetable(prev => {
-      const next = { ...prev };
-      // Remove existing entries for target day
-      for (const key of Object.keys(next)) {
-        const [, d] = key.split("-");
-        if (parseInt(d) === copyTargetDay) {
-          delete next[key];
-        }
-      }
-      // Copy entries from active day to target day
-      for (const [key, entry] of Object.entries(prev)) {
-        const [cls, d, p] = key.split("-");
-        if (parseInt(d) === activeDay) {
-          next[`${cls}-${copyTargetDay}-${p}`] = { ...entry };
-        }
-      }
-      return next;
-    });
-    setShowCopyModal(false);
-  };
-
   return (
-    <div className="flex min-h-screen mesh-gradient-bg">
-      <AdminSidebar
-        activeHref="/admin/timetable"
-      />
-      <div className="flex-1 flex flex-col min-w-0 pb-32 lg:pb-8">
-        <TopAppBar title="Timetable" subtitle="Master Schedule Builder" />
-        <main className="flex-1 px-6 py-8 max-w-5xl mx-auto w-full space-y-6">
-          {/* Section 1 — Page header with actions */}
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <h2 className="font-headline text-3xl font-light italic text-primary">
-                Master Schedule Builder
-              </h2>
-              <p className="font-label text-[10px] uppercase tracking-[0.15em] text-outline mt-1">
-                Term 2, 2025 — Monday to Friday
-              </p>
-            </div>
-            <div className="flex gap-3">
-              <EliteButton variant="outlined" size="sm" onClick={() => setShowCopyModal(true)}>
-                <span className="material-symbols-outlined text-[16px] mr-1.5">
-                  content_copy
-                </span>
-                Copy Day
-              </EliteButton>
-              <EliteButton
-                variant="primary"
-                size="sm"
-                onClick={() => setShowPublishModal(true)}
-              >
-                <span className="material-symbols-outlined text-[16px] mr-1.5">
-                  publish
-                </span>
-                Publish
-              </EliteButton>
-            </div>
+    <>
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          .no-print { display: none !important; }
+          body, main, table { background: white !important; color: black !important; }
+          @page { size: landscape; margin: 1cm; }
+          .print-cell { background: transparent !important; }
+        }
+      ` }} />
+      <datalist id="teachers-list">
+        {teachersList.map(t => <option key={t.id} value={t.name} />)}
+      </datalist>
+      <datalist id="classes-list">
+        {classesList.map(c => <option key={c.id} value={c.className} />)}
+      </datalist>
+
+      <div className="flex min-h-screen mesh-gradient-bg">
+        <div className="no-print">
+          <AdminSidebar activeHref="/admin/timetable" />
+        </div>
+        <div className="flex-1 flex flex-col min-w-0 pb-32 lg:pb-8">
+          <div className="no-print">
+            <TopAppBar title="Timetable Manager" subtitle="Manage School Schedules" />
           </div>
 
-          {/* Section 2 — Day selector tabs */}
-          <GlassCard padding="p-2">
-            <div className="flex gap-1">
-              {DAYS.map((day, i) => (
-                <button
-                  key={day}
-                  onClick={() => setActiveDay(i)}
-                  className={`flex-1 py-2.5 rounded-xl font-label text-[11px] uppercase tracking-[0.1em] transition-all duration-200 ${
-                    activeDay === i
-                      ? "bg-primary-container text-white shadow-sm"
-                      : "text-outline hover:bg-surface-container"
-                  }`}
-                >
-                  {day}
-                </button>
-              ))}
-            </div>
-          </GlassCard>
+          <main className="flex-1 px-6 py-8 mx-auto w-full max-w-full space-y-6">
+            
+            {/* Section 1 — Top toolbar */}
+            <div className="flex items-center justify-between gap-4 flex-wrap no-print">
+              <div>
+                <h2 className="font-headline text-3xl font-light italic text-primary">
+                  Timetable Manager
+                </h2>
+              </div>
+              <div className="flex items-center gap-3">
+                {conflicts.length > 0 && (
+                  <button 
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-error/10 text-error font-label text-xs font-medium border border-error/20"
+                    onClick={() => {
+                      toast.error("Conflicts found: \n" + conflicts.join("\n"), { duration: 5000 });
+                    }}
+                  >
+                    <span className="material-symbols-outlined text-[16px]">warning</span>
+                    {conflicts.length} Conflict{conflicts.length > 1 ? "s" : ""}
+                  </button>
+                )}
 
-          {/* Section 3 — Timetable grid */}
-          <GlassCard padding="p-0" className="overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse min-w-[700px]">
-                {/* Header row — periods */}
+                <select 
+                  className="bg-surface-container-low border border-outline-variant/30 text-on-surface text-sm rounded-lg px-3 py-2 font-label"
+                  value={activeClassFilter}
+                  onChange={e => setActiveClassFilter(e.target.value)}
+                >
+                  <option value="All">All Classes</option>
+                  {classesList.map(c => (
+                    <option key={c.id} value={c.className}>{c.className}</option>
+                  ))}
+                </select>
+
+                <EliteButton variant={isEditMode ? "primary" : "secondary"} size="sm" onClick={handleToggleEditMode}>
+                  <span className="material-symbols-outlined text-[16px] mr-1.5">edit</span>
+                  {isEditMode ? "Exit Edit Mode" : "Edit Mode"}
+                </EliteButton>
+                
+                {isEditMode && (
+                  <EliteButton variant="primary" size="sm" onClick={handleSaveToFirestore} disabled={!hasUnsavedChanges || isSaving}>
+                    <span className="material-symbols-outlined text-[16px] mr-1.5">save</span>
+                    Save Changes
+                  </EliteButton>
+                )}
+
+                <EliteButton variant="outlined" size="sm" onClick={() => window.print()}>
+                  <span className="material-symbols-outlined text-[16px] mr-1.5">print</span>
+                  Print / Export
+                </EliteButton>
+              </div>
+            </div>
+
+            {/* Section 2 — Timetable Grid */}
+            <GlassCard padding="p-0" className="overflow-x-auto w-full">
+              <table className="w-full min-w-[800px] border-collapse bg-surface-container-lowest">
                 <thead>
-                  <tr className="border-b border-outline-variant/30">
-                    <th className="w-20 px-4 py-3 text-left sticky left-0 bg-surface-container-low/90 backdrop-blur-sm border-r border-outline-variant/20">
-                      <span className="font-label text-[10px] uppercase tracking-[0.1em] text-outline">
-                        Class
-                      </span>
+                  <tr className="border-b border-outline-variant/30 bg-surface-container-low/50">
+                    <th className="px-4 py-3 text-left w-36 font-label text-[11px] uppercase tracking-[0.1em] text-outline border-r border-outline-variant/20">
+                      Time
                     </th>
-                    {PERIODS.map((p) => (
-                      <th
-                        key={p.time}
-                        className={`px-3 py-3 text-center min-w-[100px] font-label text-[10px] uppercase tracking-[0.08em] ${
-                          p.type === "break"
-                            ? "text-on-tertiary-container bg-surface-container/50"
-                            : "text-outline"
-                        }`}
-                      >
-                        {p.time}
-                        {p.type === "break" && (
-                          <div className="text-[8px] text-on-tertiary-container/60 mt-0.5 normal-case tracking-normal">
-                            {p.label}
-                          </div>
-                        )}
+                    {timetable.days.map(day => (
+                      <th key={day} className="px-4 py-3 text-center min-w-[150px] font-label text-[11px] uppercase tracking-[0.1em] text-outline">
+                        {day}
                       </th>
                     ))}
                   </tr>
                 </thead>
-
-                {/* Body rows — class streams */}
                 <tbody>
-                  {MOCK_CLASSES_LIST.map((cls) => (
-                    <tr
-                      key={cls}
-                      className="border-b border-outline-variant/15 last:border-0 hover:bg-surface-container/30 transition-colors"
-                    >
-                      {/* Class name — sticky left */}
-                      <td className="px-4 py-2 sticky left-0 bg-surface-container-lowest/90 backdrop-blur-sm border-r border-outline-variant/20">
-                        <span className="font-headline text-lg font-light text-primary">
-                          {cls}
-                        </span>
-                      </td>
+                  {timetable.periods.map((period) => {
+                    if (period.isBreak) {
+                      return (
+                        <tr key={period.id} className="border-b border-outline-variant/15 bg-surface-container/30">
+                          <td className="px-4 py-2 border-r border-outline-variant/20 font-mono text-[11px] text-outline text-center">
+                            {period.startTime} - {period.endTime}
+                            <div className="font-label text-[10px] mt-0.5">{period.label}</div>
+                          </td>
+                          <td colSpan={timetable.days.length} className="px-4 py-3 text-center font-label text-[10px] uppercase tracking-[0.2em] text-outline/60">
+                            BREAK
+                          </td>
+                        </tr>
+                      );
+                    }
 
-                      {/* Period cells */}
-                      {PERIODS.map((period, pi) => {
-                        if (period.type === "break") {
+                    return (
+                      <tr key={period.id} className="border-b border-outline-variant/15 hover:bg-surface-container/20">
+                        <td className="px-4 py-3 border-r border-outline-variant/20 font-mono text-[11px] text-outline">
+                          <div className="font-label text-[11px] text-on-surface mb-0.5">{period.label}</div>
+                          {period.startTime} - {period.endTime}
+                        </td>
+                        
+                        {timetable.days.map(day => {
+                          const entriesForCell = timetable.entries.filter(e => e.day === day && e.periodId === period.id && (activeClassFilter === "All" || e.class === activeClassFilter));
+                          
                           return (
-                            <td
-                              key={pi}
-                              className="px-2 py-2 bg-surface-container/30 text-center"
-                            >
-                              <span className="font-label text-[9px] text-on-tertiary-container/50 uppercase">
-                                —
-                              </span>
+                            <td key={`${day}-${period.id}`} className="p-2 border-r border-outline-variant/15 last:border-0 align-top h-full">
+                              <div className="flex flex-col gap-2 min-h-[60px]">
+                                {entriesForCell.length > 0 ? (
+                                  entriesForCell.map(entry => (
+                                    <div 
+                                      key={entry.id} 
+                                      onClick={() => handleCellClick(day, period.id)}
+                                      className={`print-cell relative group rounded-lg p-2 border-l-4 transition-all ${isEditMode ? 'cursor-pointer hover:opacity-80' : ''}`}
+                                      style={{ backgroundColor: hexToRgba(entry.colorTag, 0.15), borderLeftColor: entry.colorTag }}
+                                    >
+                                      <div className="font-label text-[11px] font-bold text-on-surface break-words leading-tight">
+                                        {entry.subject}
+                                      </div>
+                                      <div className="font-body text-[10px] text-on-surface-variant mt-1 leading-tight">
+                                        {entry.teacher}
+                                      </div>
+                                      <div className="flex justify-between items-center mt-1">
+                                        <div className="font-mono text-[9px] text-outline">
+                                          {entry.class}
+                                        </div>
+                                        <div className="font-body text-[9px] text-outline">
+                                          {entry.room}
+                                        </div>
+                                      </div>
+                                      
+                                      {isEditMode && (
+                                        <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 flex gap-1 no-print">
+                                          <button className="w-5 h-5 rounded hover:bg-white/50 text-outline flex items-center justify-center">
+                                            <span className="material-symbols-outlined text-[12px]">edit</span>
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))
+                                ) : (
+                                  isEditMode && (
+                                    <button 
+                                      onClick={() => handleCellClick(day, period.id)}
+                                      className="w-full h-full min-h-[60px] rounded-lg border border-dashed border-outline-variant/40 flex items-center justify-center hover:border-primary-container/40 hover:bg-primary-container/5 transition-all group no-print"
+                                    >
+                                      <span className="material-symbols-outlined text-[18px] text-outline/30 group-hover:text-primary-container/50">add</span>
+                                    </button>
+                                  )
+                                )}
+                              </div>
                             </td>
                           );
-                        }
-
-                        const entry = getTimetableEntry(cls, activeDay, pi);
-
-                        return (
-                          <td key={pi} className="px-2 py-2">
-                            {entry ? (
-                              // Filled cell
-                              <div
-                                className="relative group bg-primary-container/8 border border-primary-container/20 rounded-xl p-2 cursor-pointer hover:bg-primary-container/15 transition-all"
-                                onClick={() => {
-                                  setEditEntry({
-                                    cls,
-                                    dayIndex: activeDay,
-                                    periodIndex: pi,
-                                    entry,
-                                  });
-                                  setEntryForm({
-                                    subject: entry.subject,
-                                    teacherId: entry.teacherId,
-                                    teacherCode: entry.teacherCode,
-                                    room: entry.room,
-                                  });
-                                }}
-                              >
-                                <div className="font-label text-[11px] text-primary-container font-medium tracking-[0.04em]">
-                                  {entry.subject}
-                                  <sup className="text-[8px] ml-0.5 opacity-70">
-                                    {entry.teacherCode}
-                                  </sup>
-                                </div>
-                                <div className="font-label text-[9px] text-outline mt-0.5">
-                                  {entry.room}
-                                </div>
-                                {/* Delete on hover */}
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    clearEntry(cls, activeDay, pi);
-                                  }}
-                                  className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 w-4 h-4 rounded-full bg-error/10 hover:bg-error/20 flex items-center justify-center transition-all"
-                                >
-                                  <span className="material-symbols-outlined text-[10px] text-error">
-                                    close
-                                  </span>
-                                </button>
-                              </div>
-                            ) : (
-                              // Empty cell — click to add
-                              <button
-                                onClick={() => {
-                                  setAddEntry({
-                                    cls,
-                                    dayIndex: activeDay,
-                                    periodIndex: pi,
-                                  });
-                                  setEntryForm({ subject: "", teacherId: "", teacherCode: "", room: "" });
-                                }}
-                                className="w-full h-14 rounded-xl border border-dashed border-outline-variant/40 flex items-center justify-center hover:border-primary-container/40 hover:bg-primary-container/5 transition-all group"
-                              >
-                                <span className="material-symbols-outlined text-[18px] text-outline/30 group-hover:text-primary-container/50 transition-colors">
-                                  add
-                                </span>
-                              </button>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
+                        })}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
-            </div>
-          </GlassCard>
-        </main>
+            </GlassCard>
+
+            {/* Section 3 — Edit Mode Panels */}
+            {isEditMode && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 no-print">
+                
+                {/* Panel A — Manage Days */}
+                <GlassCard padding="p-5" className="flex flex-col gap-4">
+                  <h3 className="font-headline text-xl text-primary mb-2">Manage Days</h3>
+                  
+                  <div className="flex gap-2">
+                    <EliteInput 
+                      placeholder="e.g. Saturday" 
+                      value={newDayForm}
+                      onChange={e => setNewDayForm(e.target.value)}
+                      onKeyDown={e => { if(e.key === "Enter") handleAddDay(); }}
+                    />
+                    <EliteButton variant="primary" onClick={handleAddDay}>Add</EliteButton>
+                  </div>
+
+                  <div className="flex gap-2 mb-2 flex-wrap">
+                    <button onClick={() => setPresetDays(["Monday","Tuesday","Wednesday","Thursday","Friday"])} className="text-xs px-2 py-1 bg-surface-container rounded font-label text-outline hover:text-on-surface">Mon-Fri</button>
+                    <button onClick={() => setPresetDays(["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"])} className="text-xs px-2 py-1 bg-surface-container rounded font-label text-outline hover:text-on-surface">Mon-Sat</button>
+                    <button onClick={() => setPresetDays(["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"])} className="text-xs px-2 py-1 bg-surface-container rounded font-label text-outline hover:text-on-surface">Sun-Sat</button>
+                  </div>
+
+                  <ul className="space-y-2 max-h-[300px] overflow-y-auto">
+                    {timetable.days.map((day, ix) => (
+                      <li key={day} className="flex justify-between items-center p-2 rounded-lg bg-surface-container border border-outline-variant/20">
+                        <span className="font-label text-sm text-on-surface">{day}</span>
+                        <div className="flex gap-1">
+                          <button onClick={() => handleMoveDay(ix, 'up')} disabled={ix === 0} className="w-6 h-6 flex items-center justify-center text-outline hover:text-primary disabled:opacity-30"><span className="material-symbols-outlined text-[16px]">arrow_upward</span></button>
+                          <button onClick={() => handleMoveDay(ix, 'down')} disabled={ix === timetable.days.length - 1} className="w-6 h-6 flex items-center justify-center text-outline hover:text-primary disabled:opacity-30"><span className="material-symbols-outlined text-[16px]">arrow_downward</span></button>
+                          <button onClick={() => handleRemoveDay(day)} className="w-6 h-6 flex items-center justify-center text-error/70 hover:text-error"><span className="material-symbols-outlined text-[16px]">close</span></button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </GlassCard>
+
+                {/* Panel B — Manage Periods */}
+                <GlassCard padding="p-5" className="flex flex-col gap-4">
+                  <h3 className="font-headline text-xl text-primary mb-2">Manage Periods</h3>
+                  
+                  <div className="space-y-2 bg-surface-container-low p-3 rounded-xl border border-outline-variant/30">
+                    <EliteInput placeholder="Label (e.g. Period 1, Break)" value={newPeriodForm.label} onChange={e => setNewPeriodForm({...newPeriodForm, label: e.target.value})} />
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <label className="text-[10px] uppercase font-label text-outline">Start Form</label>
+                        <EliteInput type="time" placeholder="08:00" value={newPeriodForm.startTime} onChange={e => setNewPeriodForm({...newPeriodForm, startTime: e.target.value})} />
+                      </div>
+                      <div className="flex-1">
+                        <label className="text-[10px] uppercase font-label text-outline">End Form</label>
+                        <EliteInput type="time" placeholder="08:40" value={newPeriodForm.endTime} onChange={e => setNewPeriodForm({...newPeriodForm, endTime: e.target.value})} />
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-2 font-label text-sm text-on-surface py-1 cursor-pointer">
+                      <input type="checkbox" checked={newPeriodForm.isBreak} onChange={e => setNewPeriodForm({...newPeriodForm, isBreak: e.target.checked})} className="rounded text-primary-container focus:ring-primary-container" />
+                      Is Break
+                    </label>
+                    <EliteButton variant="primary" fullWidth onClick={handleAddPeriod}>Add Period</EliteButton>
+                  </div>
+
+                  <ul className="space-y-2 max-h-[250px] overflow-y-auto">
+                    {timetable.periods.map((p, ix) => (
+                      <li key={p.id} className="flex justify-between items-center p-2 rounded-lg bg-surface-container border border-outline-variant/20">
+                        <div>
+                          <p className="font-label text-sm text-on-surface leading-none">{p.label}</p>
+                          <p className="font-mono text-[10px] text-outline mt-1">{p.startTime} - {p.endTime}</p>
+                        </div>
+                        <div className="flex gap-1 ml-4">
+                          <button onClick={() => handleMovePeriod(ix, 'up')} disabled={ix === 0} className="w-6 h-6 flex items-center justify-center text-outline hover:text-primary disabled:opacity-30"><span className="material-symbols-outlined text-[16px]">arrow_upward</span></button>
+                          <button onClick={() => handleMovePeriod(ix, 'down')} disabled={ix === timetable.periods.length - 1} className="w-6 h-6 flex items-center justify-center text-outline hover:text-primary disabled:opacity-30"><span className="material-symbols-outlined text-[16px]">arrow_downward</span></button>
+                          <button onClick={() => handleRemovePeriod(p.id)} className="w-6 h-6 flex items-center justify-center text-error/70 hover:text-error"><span className="material-symbols-outlined text-[16px]">delete</span></button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </GlassCard>
+
+                {/* Panel C — Cell Settings */}
+                <GlassCard padding="p-5" className="flex flex-col gap-4">
+                  <h3 className="font-headline text-xl text-primary mb-2">Cell Settings</h3>
+                  {cellEdit ? (
+                    <div className="space-y-3">
+                      <div className="flex gap-2 mb-2 font-label text-[11px] uppercase tracking-widest text-outline">
+                        <span className="bg-surface-container px-2 py-1 rounded">{cellEdit.day}</span>
+                        <span className="bg-surface-container px-2 py-1 rounded">{timetable.periods.find(p => p.id === cellEdit.periodId)?.label}</span>
+                      </div>
+                      
+                      <div>
+                        <label className="text-[10px] uppercase font-label text-outline mb-1 block">Subject</label>
+                        <EliteInput placeholder="e.g. Mathematics" value={cellForm.subject} onChange={e => setCellForm({...cellForm, subject: e.target.value})} />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] uppercase font-label text-outline mb-1 block">Class</label>
+                          <input list="classes-list" placeholder="e.g. S.1A" className="w-full h-11 bg-[transparent] border-b border-outline-variant/40 font-body text-sm text-on-surface focus:outline-none focus:border-primary-container transition-colors py-2 px-1 placeholder:text-outline/50" value={cellForm.class} onChange={e => setCellForm({...cellForm, class: e.target.value})} />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase font-label text-outline mb-1 block">Room</label>
+                          <EliteInput placeholder="e.g. Room 12" value={cellForm.room} onChange={e => setCellForm({...cellForm, room: e.target.value})} />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] uppercase font-label text-outline mb-1 block">Teacher</label>
+                        <input list="teachers-list" placeholder="Teacher name" className="w-full h-11 bg-[transparent] border-b border-outline-variant/40 font-body text-sm text-on-surface focus:outline-none focus:border-primary-container transition-colors py-2 px-1 placeholder:text-outline/50" value={cellForm.teacher} onChange={e => setCellForm({...cellForm, teacher: e.target.value})} />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] uppercase font-label text-outline mb-2 block">Color Tag</label>
+                        <div className="flex flex-wrap gap-2">
+                          {COLOR_PRESETS.map(hex => (
+                            <button
+                              key={hex}
+                              onClick={() => setCellForm({...cellForm, colorTag: hex})}
+                              className={`w-8 h-8 rounded-full border-2 transition-transform ${cellForm.colorTag === hex ? 'scale-110 border-on-surface' : 'border-transparent'}`}
+                              style={{ backgroundColor: hex }}
+                            />
+                          ))}
+                          <div className="ml-2 border-l border-outline-variant/30 pl-2">
+                            <input 
+                              type="color" 
+                              value={cellForm.colorTag}
+                              onChange={e => setCellForm({...cellForm, colorTag: e.target.value})}
+                              className="w-8 h-8 rounded cursor-pointer"
+                              title="Custom Color"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3 pt-3">
+                        <EliteButton variant="primary" fullWidth onClick={handleSaveCell}>Save Cell</EliteButton>
+                        {cellEdit.entry && (
+                          <EliteButton variant="outlined" onClick={() => handleDeleteEntry(cellEdit.entry!.id)}>
+                            <span className="material-symbols-outlined text-[16px] text-error">delete</span>
+                          </EliteButton>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center text-center p-6 border-2 border-dashed border-outline-variant/30 rounded-xl bg-surface-container-lowest/50">
+                      <p className="font-body text-sm text-outline">Click any cell in the grid to add or edit a lesson.</p>
+                    </div>
+                  )}
+                </GlassCard>
+
+              </div>
+            )}
+          </main>
+        </div>
+        
+        <div className="no-print">
+          <BottomNavBar items={ADMIN_NAV_ITEMS} activeHref="/admin/timetable" />
+        </div>
       </div>
-      <BottomNavBar items={ADMIN_NAV_ITEMS} activeHref="/admin/timetable" />
-
-      {/* Add/Edit Entry Modal */}
-      {(addEntry || editEntry) && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-inverse-surface/40 backdrop-blur-sm">
-          <GlassCard className="w-full max-w-sm" padding="p-6">
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <h3 className="font-headline text-2xl font-light italic text-primary">
-                  {editEntry ? "Edit Lesson" : "Assign Lesson"}
-                </h3>
-                <p className="font-label text-[10px] uppercase tracking-[0.1em] text-outline mt-0.5">
-                  {addEntry?.cls || editEntry?.cls} —{" "}
-                  {
-                    PERIODS[
-                      addEntry?.periodIndex ?? editEntry?.periodIndex ?? 0
-                    ].time
-                  }
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  setAddEntry(null);
-                  setEditEntry(null);
-                }}
-                className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center"
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  close
-                </span>
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {/* Subject */}
-              <div>
-                <label className="font-label text-[10px] uppercase tracking-[0.15em] text-outline block mb-2">
-                  Subject
-                </label>
-                <select
-                  value={entryForm.subject}
-                  onChange={(e) =>
-                    setEntryForm((p) => ({ ...p, subject: e.target.value }))
-                  }
-                  className="w-full h-11 bg-surface-container-low rounded-full px-4 font-body text-sm font-light border-none focus:ring-2 focus:ring-primary-container focus:outline-none"
-                >
-                  <option value="">Select subject...</option>
-                  {[
-                    "ENG", "MATH", "PHY", "CHEM", "BIO", "GEO", "HIS", "CRE", "LIT", "ICT",
-                  ].map((s) => (
-                    <option key={s}>{s}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Teacher */}
-              <div>
-                <label className="font-label text-[10px] uppercase tracking-[0.15em] text-outline block mb-2">
-                  Teacher
-                </label>
-                <select
-                  value={entryForm.teacherId}
-                  onChange={(e) => {
-                    const t = MOCK_TEACHERS_LIST.find(
-                      (t) => t.id === e.target.value
-                    );
-                    setEntryForm((p) => ({
-                      ...p,
-                      teacherId: e.target.value,
-                      teacherCode: t?.code || "",
-                    }));
-                  }}
-                  className="w-full h-11 bg-surface-container-low rounded-full px-4 font-body text-sm font-light border-none focus:ring-2 focus:ring-primary-container focus:outline-none"
-                >
-                  <option value="">Select teacher...</option>
-                  {MOCK_TEACHERS_LIST.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name} (TR-{t.code})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Clash warning */}
-              {clashWarning && (
-                <div className="flex items-start gap-3 p-3 rounded-xl bg-error/8 border border-error/20">
-                  <span className="material-symbols-outlined text-[18px] text-error flex-shrink-0 mt-0.5">
-                    warning
-                  </span>
-                  <p className="font-body text-xs text-error leading-relaxed">
-                    {clashWarning}
-                  </p>
-                </div>
-              )}
-
-              {/* Room */}
-              <EliteInput
-                label="Room / Location"
-                placeholder="e.g. Room 12, Lab 1, Hall A"
-                value={entryForm.room}
-                onChange={(e) =>
-                  setEntryForm((p) => ({ ...p, room: e.target.value }))
-                }
-              />
-
-              <div className="flex gap-3 pt-2">
-                <EliteButton
-                  variant="outlined"
-                  fullWidth
-                  onClick={() => {
-                    setAddEntry(null);
-                    setEditEntry(null);
-                  }}
-                >
-                  Cancel
-                </EliteButton>
-                <EliteButton
-                  variant="primary"
-                  fullWidth
-                  onClick={handleSaveEntry}
-                  disabled={!!clashWarning}
-                >
-                  {editEntry ? "Update" : "Assign"}
-                </EliteButton>
-              </div>
-            </div>
-          </GlassCard>
-        </div>
-      )}
-
-      {/* Publish confirmation modal */}
-      {showPublishModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-inverse-surface/40 backdrop-blur-sm">
-          <GlassCard className="w-full max-w-sm" padding="p-6">
-            <div className="w-12 h-12 rounded-full bg-primary-container/10 flex items-center justify-center mx-auto mb-4">
-              <span className="material-symbols-outlined text-[24px] text-primary-container">
-                publish
-              </span>
-            </div>
-            <h3 className="font-headline text-xl font-light text-primary text-center mb-2">
-              Publish Timetable?
-            </h3>
-            <p className="font-body text-sm text-on-surface-variant font-light text-center mb-6 leading-relaxed">
-              This will make the timetable visible to all teachers and parents.
-              All staff will be notified.
-            </p>
-            <div className="flex gap-3">
-              <EliteButton
-                variant="outlined"
-                fullWidth
-                onClick={() => setShowPublishModal(false)}
-              >
-                Cancel
-              </EliteButton>
-              <EliteButton
-                variant="primary"
-                fullWidth
-                onClick={() => setShowPublishModal(false)}
-              >
-                Publish Now
-              </EliteButton>
-            </div>
-          </GlassCard>
-        </div>
-      )}
-
-      {/* Copy Day Modal */}
-      {showCopyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-inverse-surface/40 backdrop-blur-sm">
-          <GlassCard className="w-full max-w-sm" padding="p-6">
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <h3 className="font-headline text-2xl font-light italic text-primary">
-                  Copy Day
-                </h3>
-                <p className="font-label text-[10px] uppercase tracking-[0.1em] text-outline mt-0.5">
-                  Copy {DAYS[activeDay]} to another day
-                </p>
-              </div>
-              <button
-                onClick={() => setShowCopyModal(false)}
-                className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center"
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  close
-                </span>
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="font-label text-[10px] uppercase tracking-[0.15em] text-outline block mb-2">
-                  Target Day
-                </label>
-                <select
-                  value={copyTargetDay}
-                  onChange={(e) => setCopyTargetDay(parseInt(e.target.value))}
-                  className="w-full h-11 bg-surface-container-low rounded-full px-4 font-body text-sm font-light border-none focus:ring-2 focus:ring-primary-container focus:outline-none"
-                >
-                  {DAYS.map((day, i) => (
-                    <option key={day} value={i} disabled={i === activeDay}>
-                      {day} {i === activeDay ? "(Current)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex items-start gap-3 p-3 rounded-xl bg-error/10 border border-error/20">
-                <span className="material-symbols-outlined text-[18px] text-error flex-shrink-0 mt-0.5">
-                  warning
-                </span>
-                <p className="font-body text-xs text-error leading-relaxed">
-                  This will overwrite any existing entries on the target day.
-                </p>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <EliteButton
-                  variant="outlined"
-                  fullWidth
-                  onClick={() => setShowCopyModal(false)}
-                >
-                  Cancel
-                </EliteButton>
-                <EliteButton
-                  variant="primary"
-                  fullWidth
-                  onClick={handleCopyDay}
-                  disabled={copyTargetDay === activeDay}
-                >
-                  Copy
-                </EliteButton>
-              </div>
-            </div>
-          </GlassCard>
-        </div>
-      )}
-    </div>
+    </>
   );
 }

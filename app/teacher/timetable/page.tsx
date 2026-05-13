@@ -6,36 +6,37 @@ import { useRouter } from "next/navigation";
 import BottomNavBar, { TEACHER_NAV_ITEMS } from "@/components/layout/BottomNavBar";
 import CollectionErrorBanner from "@/components/ui/CollectionErrorBanner";
 import { useTeacherData } from "@/lib/hooks/useTeacherData";
-import { useCollection } from "@/lib/hooks/useSchoolData";
+import { useAuthGuard } from "@/lib/hooks/useAuthGuard";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase/config";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+interface TimetableConfig {
+  days: string[];
+  periods: Period[];
+  entries: TimetableEntry[];
+  updatedAt: string;
+}
 
-const TIME_SLOTS = [
-  "08:00", "09:00", "10:00", "11:00", "12:00",
-  "13:00", "14:00", "15:00", "16:00",
-];
-
-type TimetableEntry = {
+interface Period {
   id: string;
-  day: string;
+  label: string;
   startTime: string;
   endTime: string;
-  subject: string;
-  code: string;
-  room: string;
-  students: number;
-  color: "petrol" | "charcoal" | "taupe" | "muted";
-  teacherId: string;
-};
+  isBreak: boolean;
+}
 
-const COLOR_MAP = {
-  petrol:   { bg: "#2B4D5A", text: "#ffffff", codeBg: "rgba(255,255,255,0.15)" },
-  charcoal: { bg: "#141416", text: "#ffffff", codeBg: "rgba(255,255,255,0.12)" },
-  taupe:    { bg: "#B5A898", text: "#1b1c19", codeBg: "rgba(0,0,0,0.08)"       },
-  muted:    { bg: "#e4e2dd", text: "#41484b", codeBg: "rgba(0,0,0,0.05)"       },
-};
+interface TimetableEntry {
+  id: string;
+  day: string;
+  periodId: string;
+  subject: string;
+  teacher: string;
+  class: string;
+  room: string;
+  colorTag: string;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,13 @@ function computeDuration(start: string, end: string): string {
   const [eh, em] = end.split(":").map(Number);
   const mins = (eh * 60 + em) - (sh * 60 + sm);
   return mins === 60 ? "1h" : `${mins}m`;
+}
+
+function hexToRgba(hex: string, alpha: number) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 // ─── Subcomponents ────────────────────────────────────────────────────────────
@@ -97,48 +105,88 @@ function CustomTopAppBar({ initials }: { initials: string }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
-
 export default function TeacherTimetablePage() {
-  useAuthGuard('teacher');
+  useAuthGuard("teacher");
   const router = useRouter();
-  const [activeDay, setActiveDay] = useState("Fri");
-  const [selectedEntry, setSelectedEntry] = useState<TimetableEntry | null>(null);
+  
+  const [activeDay, setActiveDay] = useState("");
+  const [selectedEntry, setSelectedEntry] = useState<(TimetableEntry & { period: Period }) | null>(null);
+  
+  const [timetable, setTimetable] = useState<TimetableConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
   const { teacherProfile } = useTeacherData();
-  const { data: allTimetable, error: timetableError } = useCollection<TimetableEntry>(
-    teacherProfile?.schoolId || null, "timetable"
-  );
 
-  const teacherTimetable = allTimetable.filter(t => t.teacherId === teacherProfile?.uid);
+  useEffect(() => {
+    if (!teacherProfile?.schoolId) return;
+    
+    const fetchTimetable = async () => {
+      setLoading(true);
+      try {
+        const docRef = doc(db, `schools/${teacherProfile.schoolId}/timetable/config`);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists() && docSnap.data().updatedAt) {
+          const tt = docSnap.data() as TimetableConfig;
+          setTimetable(tt);
+          
+          // Set initial active day to today or the first day in the timetable if today is not found
+          const todayExt = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+          if (tt.days.includes(todayExt)) {
+            setActiveDay(todayExt);
+          } else if (tt.days.length > 0) {
+            setActiveDay(tt.days[0]);
+          }
+        } else {
+          setTimetable({ days: [], periods: [], entries: [], updatedAt: new Date().toISOString() });
+        }
+      } catch (err) {
+        console.error(err);
+        setError(err instanceof Error ? err : new Error("Failed to load timetable"));
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchTimetable();
+  }, [teacherProfile?.schoolId]);
 
+  const teacherInitials = teacherProfile?.name ? teacherProfile.name.split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase() : "PN";
+
+  if (loading) {
+    return <div className="flex items-center justify-center min-h-screen mesh-gradient-bg">Loading...</div>;
+  }
+
+  // Filter entries to only show those for the logged-in teacher
+  const teacherTimetable = timetable?.entries.filter(e => e.teacher === teacherProfile?.name || e.teacher === teacherProfile?.uid) || [];
+  
   const dayEntries = teacherTimetable
     .filter(e => e.day === activeDay)
-    .sort((a, b) => a.startTime.localeCompare(b.startTime));
-
-  const teacherInitials = teacherProfile?.name ? teacherProfile.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : "PN";
+    .map(e => ({
+      ...e,
+      period: timetable?.periods.find(p => p.id === e.periodId)!
+    }))
+    .filter(e => e.period) // Ensure parent period exists
+    .sort((a, b) => a.period.startTime.localeCompare(b.period.startTime));
 
   // Calculate week summary
   const totalClasses = teacherTimetable.length;
   let totalMinutes = 0;
-  teacherTimetable.forEach(t => {
-    const [sh, sm] = t.startTime.split(":").map(Number);
-    const [eh, em] = t.endTime.split(":").map(Number);
-    totalMinutes += (eh * 60 + em) - (sh * 60 + sm);
+  
+  teacherTimetable.forEach(e => {
+    const period = timetable?.periods.find(p => p.id === e.periodId);
+    if (period) {
+      const [sh, sm] = period.startTime.split(":").map(Number);
+      const [eh, em] = period.endTime.split(":").map(Number);
+      totalMinutes += (eh * 60 + em) - (sh * 60 + sm);
+    }
   });
+  
   const totalHours = Math.round(totalMinutes / 60);
-  
-  // Estimate total students (unique students across classes would be better, but this is an approximation)
-  const totalStudents = teacherTimetable.reduce((sum, t) => sum + (t.students || 0), 0);
-  
-  // Calculate free slots (assuming 9 slots per day, 5 days = 45 total slots)
-  const freeSlots = 45 - totalClasses;
 
   const WEEK_SUMMARY = [
     { label: "Classes",    value: totalClasses.toString() },
     { label: "Hours",      value: totalHours.toString() },
-    { label: "Students",   value: totalStudents.toString() },
-    { label: "Free Slots", value: freeSlots.toString()  },
   ];
 
   return (
@@ -147,7 +195,7 @@ export default function TeacherTimetablePage() {
         <CustomTopAppBar initials={teacherInitials} />
         
         <main className="flex-1 px-6 py-8 max-w-5xl mx-auto w-full pt-28 space-y-8">
-          <CollectionErrorBanner error={timetableError} />
+          <CollectionErrorBanner error={error} />
           {/* Section 1 — Page header */}
           <div>
             <h1 className="text-5xl font-light text-[#2B4D5A]" style={{ fontFamily: "'Cormorant Garamond', serif" }}>
@@ -176,43 +224,45 @@ export default function TeacherTimetablePage() {
           </div>
 
           {/* Section 3 — Day selector tabs */}
-          <div className="bg-[#faf9f4]/60 backdrop-blur-xl rounded-2xl border border-[#c1c7cb]/30 p-2">
-            <div className="flex gap-1">
-              {DAYS.map(day => {
-                const count = teacherTimetable.filter(e => e.day === day).length;
-                return (
-                  <button
-                    key={day}
-                    onClick={() => setActiveDay(day)}
-                    className="flex-1 flex flex-col items-center py-2.5 rounded-xl transition-all"
-                    style={{
-                      background: activeDay === day ? "#2B4D5A" : "transparent",
-                      color: activeDay === day ? "#ffffff" : "#72787b",
-                    }}
-                  >
-                    <span className="text-sm font-medium" style={{ fontFamily: "'DM Sans', sans-serif" }}>
-                      {day}
-                    </span>
-                    {/* Dot indicators */}
-                    <div className="flex gap-[3px] mt-1.5">
-                      {Array.from({ length: Math.min(count, 4) }).map((_, i) => (
-                        <div
-                          key={i}
-                          className="w-1 h-1 rounded-full"
-                          style={{ background: activeDay === day ? "rgba(255,255,255,0.6)" : "#c1c7cb" }}
-                        />
-                      ))}
-                    </div>
-                  </button>
-                );
-              })}
+          {timetable && timetable.days.length > 0 && (
+            <div className="bg-[#faf9f4]/60 backdrop-blur-xl rounded-2xl border border-[#c1c7cb]/30 p-2">
+              <div className="flex gap-1 overflow-x-auto no-scrollbar">
+                {timetable.days.map(day => {
+                  const count = teacherTimetable.filter(e => e.day === day).length;
+                  return (
+                    <button
+                      key={day}
+                      onClick={() => setActiveDay(day)}
+                      className="flex-1 min-w-[60px] flex flex-col items-center py-2.5 rounded-xl transition-all"
+                      style={{
+                        background: activeDay === day ? "#2B4D5A" : "transparent",
+                        color: activeDay === day ? "#ffffff" : "#72787b",
+                      }}
+                    >
+                      <span className="text-sm font-medium" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+                        {day.substring(0, 3)}
+                      </span>
+                      {/* Dot indicators */}
+                      <div className="flex gap-[3px] mt-1.5 h-1">
+                        {Array.from({ length: Math.min(count, 4) }).map((_, i) => (
+                          <div
+                            key={i}
+                            className="w-1 h-1 rounded-full"
+                            style={{ background: activeDay === day ? "rgba(255,255,255,0.6)" : "#c1c7cb" }}
+                          />
+                        ))}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Section 4 — Day schedule */}
           <div className="space-y-4">
             <h2 className="text-2xl text-[#2B4D5A]" style={{ fontFamily: "'Cormorant Garamond', serif" }}>
-              {activeDay === "Fri" ? "Today" : activeDay} · {dayEntries.length} Classes
+              {activeDay === new Date().toLocaleDateString('en-US', { weekday: 'long' }) ? "Today" : activeDay} · {dayEntries.length} Classes
             </h2>
 
             {dayEntries.length === 0 ? (
@@ -227,89 +277,80 @@ export default function TeacherTimetablePage() {
             ) : (
               <div className="space-y-3">
                 {dayEntries.map((entry, index) => {
-                  const colors = COLOR_MAP[entry.color] || COLOR_MAP.petrol;
                   const previousEntry = index > 0 ? dayEntries[index - 1] : null;
                   
-                  const gapSlots = [];
-                  if (previousEntry) {
-                    for (const slot of TIME_SLOTS) {
-                      if (slot >= previousEntry.endTime && slot < entry.startTime) {
-                        gapSlots.push(slot);
-                      }
-                    }
-                  } else {
-                    for (const slot of TIME_SLOTS) {
-                      if (slot < entry.startTime) {
-                        gapSlots.push(slot);
-                      }
-                    }
+                  // Extremely basic gap detection between periods
+                  let hasGap = false;
+                  if (previousEntry && timetable) {
+                   const pIdx1 = timetable.periods.findIndex(p => p.id === previousEntry.periodId);
+                   const pIdx2 = timetable.periods.findIndex(p => p.id === entry.periodId);
+                   if (pIdx2 - pIdx1 > 1) hasGap = true;
                   }
 
                   return (
                     <div key={entry.id} className="space-y-3">
-                      {gapSlots.map(slot => (
-                        <div key={slot} className="flex gap-4 items-center opacity-50">
+                      {hasGap && (
+                        <div className="flex gap-4 items-center opacity-50">
                           <div className="w-14 flex-shrink-0 text-right">
-                            <span className="text-[10px] text-[#72787b]" style={{ fontFamily: "'DM Mono', monospace" }}>{slot}</span>
+                            <span className="text-[10px] text-[#72787b]" style={{ fontFamily: "'DM Mono', monospace" }}>--</span>
                           </div>
                           <div className="flex-1 h-px bg-[#c1c7cb]/30" />
+                          <span className="text-[10px] text-[#72787b] pr-4 uppercase tracking-widest font-label">Gap / Break</span>
                         </div>
-                      ))}
+                      )}
+                      
                       <motion.div
                         style={{ animation: `fadeSlideIn 0.3s ${index * 0.07}s ease both` }}
                         className="flex gap-4 items-stretch"
                       >
-                      {/* Time column */}
-                      <div className="flex flex-col items-end pt-1 w-14 flex-shrink-0">
-                        <span className="text-[10px] text-[#72787b]" style={{ fontFamily: "'DM Mono', monospace" }}>
-                          {entry.startTime}
-                        </span>
-                        <div className="w-px flex-1 my-1 bg-[#c1c7cb]/20 mx-auto" />
-                        <span className="text-[10px] text-[#72787b] opacity-60" style={{ fontFamily: "'DM Mono', monospace" }}>
-                          {entry.endTime}
-                        </span>
-                      </div>
+                        {/* Time column */}
+                        <div className="flex flex-col items-end pt-1 w-14 flex-shrink-0">
+                          <span className="text-[10px] text-[#72787b]" style={{ fontFamily: "'DM Mono', monospace" }}>
+                            {entry.period.startTime}
+                          </span>
+                          <div className="w-px flex-1 my-1 bg-[#c1c7cb]/20 mx-auto" />
+                          <span className="text-[10px] text-[#72787b] opacity-60" style={{ fontFamily: "'DM Mono', monospace" }}>
+                            {entry.period.endTime}
+                          </span>
+                        </div>
 
-                      {/* Class card */}
-                      <button
-                        onClick={() => setSelectedEntry(entry)}
-                        className="flex-1 rounded-2xl p-5 text-left transition-all hover:scale-[1.01] active:scale-[0.99]"
-                        style={{ background: colors.bg, boxShadow: "0 4px 20px rgba(20,20,22,0.08)" }}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1">
+                        {/* Class card */}
+                        <button
+                          onClick={() => setSelectedEntry(entry)}
+                          className="flex-1 rounded-2xl p-5 text-left transition-all hover:scale-[1.01] active:scale-[0.99]"
+                          style={{ background: entry.colorTag, boxShadow: "0 4px 20px rgba(20,20,22,0.08)" }}
+                        >
+                          <div className="flex items-start justify-between gap-3 text-white">
+                            <div className="flex-1">
+                              <div
+                                className="text-[10px] rounded-full px-2 py-0.5 w-fit mb-2"
+                                style={{
+                                  fontFamily: "'DM Mono', monospace",
+                                  background: "rgba(255,255,255,0.2)",
+                                }}
+                              >
+                                {entry.class}
+                              </div>
+                              <h3 className="text-base font-medium" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+                                {entry.subject}
+                              </h3>
+                              <p className="text-sm opacity-90 mt-1" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+                                {entry.room}
+                              </p>
+                            </div>
+                            {/* Duration chip */}
                             <div
-                              className="text-[10px] rounded-full px-2 py-0.5 w-fit mb-2"
+                              className="text-[10px] px-2 py-1 rounded-xl opacity-80"
                               style={{
                                 fontFamily: "'DM Mono', monospace",
-                                background: colors.codeBg,
-                                color: colors.text,
-                                opacity: 0.85,
+                                background: "rgba(255,255,255,0.15)",
                               }}
                             >
-                              {entry.code}
+                              {computeDuration(entry.period.startTime, entry.period.endTime)}
                             </div>
-                            <h3 className="text-base font-medium" style={{ fontFamily: "'DM Sans', sans-serif", color: colors.text }}>
-                              {entry.subject}
-                            </h3>
-                            <p className="text-sm opacity-70 mt-1" style={{ fontFamily: "'DM Sans', sans-serif", color: colors.text }}>
-                              {entry.room}{entry.students > 0 ? ` · ${entry.students} students` : ""}
-                            </p>
                           </div>
-                          {/* Duration chip */}
-                          <div
-                            className="text-[10px] px-2 py-1 rounded-xl opacity-60"
-                            style={{
-                              fontFamily: "'DM Mono', monospace",
-                              background: colors.codeBg,
-                              color: colors.text,
-                            }}
-                          >
-                            {computeDuration(entry.startTime, entry.endTime)}
-                          </div>
-                        </div>
-                      </button>
-                    </motion.div>
+                        </button>
+                      </motion.div>
                     </div>
                   );
                 })}
@@ -341,16 +382,16 @@ export default function TeacherTimetablePage() {
               onClick={(e) => e.stopPropagation()}
             >
               {/* Colored header band */}
-              <div className="p-6" style={{ background: (COLOR_MAP[selectedEntry.color] || COLOR_MAP.petrol).bg }}>
+              <div className="p-6 text-white" style={{ background: selectedEntry.colorTag }}>
                 <p
-                  className="text-[10px] opacity-70 mb-1"
-                  style={{ fontFamily: "'DM Mono', monospace", color: (COLOR_MAP[selectedEntry.color] || COLOR_MAP.petrol).text }}
+                  className="text-[10px] opacity-80 mb-1"
+                  style={{ fontFamily: "'DM Mono', monospace" }}
                 >
-                  {selectedEntry.code}
+                  {selectedEntry.class} · {selectedEntry.period.label}
                 </p>
                 <h2
                   className="text-3xl"
-                  style={{ fontFamily: "'Cormorant Garamond', serif", color: (COLOR_MAP[selectedEntry.color] || COLOR_MAP.petrol).text }}
+                  style={{ fontFamily: "'Cormorant Garamond', serif" }}
                 >
                   {selectedEntry.subject}
                 </h2>
@@ -359,11 +400,10 @@ export default function TeacherTimetablePage() {
               {/* Detail rows */}
               <div className="p-6 space-y-4">
                 {[
-                  { label: "Time", value: `${selectedEntry.startTime} – ${selectedEntry.endTime}` },
-                  { label: "Room", value: selectedEntry.room },
+                  { label: "Time", value: `${selectedEntry.period.startTime} – ${selectedEntry.period.endTime}` },
+                  { label: "Room", value: selectedEntry.room || "TBA" },
                   { label: "Day", value: selectedEntry.day },
-                  { label: "Students", value: selectedEntry.students > 0 ? `${selectedEntry.students} enrolled` : "Staff only" },
-                  { label: "Duration", value: computeDuration(selectedEntry.startTime, selectedEntry.endTime) },
+                  { label: "Duration", value: computeDuration(selectedEntry.period.startTime, selectedEntry.period.endTime) },
                 ].map(row => (
                   <div
                     key={row.label}
