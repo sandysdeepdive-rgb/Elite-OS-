@@ -11,7 +11,7 @@ import { useSchoolData } from "@/lib/hooks/useSchoolData";
 import { useAuthGuard } from "@/lib/hooks/useAuthGuard";
 import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
-import { toast } from "sonner";
+import { toast } from "soner";
 
 interface TimetableConfig {
   days: string[];
@@ -512,7 +512,7 @@ export default function AdminTimetablePage() {
                                   isEditMode && (
                                     <button 
                                       onClick={() => handleCellClick(day, period.id)}
-                                      className="w-full h-full min-h-[60px] rounded-lg border border-dashed border-outline-variant/40 flex items-center justify-center hover:border-primary-container/40 hover:bg-primary-container/5 transition-all group no-print"
+                                      className="w-full h-full min-h-[60px] rounded-lg border border-dashed border-outline-variant/40 flex items-center justify-center hover:border-primary-container/40"
                                     >
                                       <span className="material-symbols-outlined text-[18px] text-outline/30 group-hover:text-primary-container/50">add</span>
                                     </button>
@@ -548,9 +548,15 @@ export default function AdminTimetablePage() {
                   </div>
 
                   <div className="flex gap-2 mb-2 flex-wrap">
-                    <button onClick={() => setPresetDays(["Monday","Tuesday","Wednesday","Thursday","Friday"])} className="text-xs px-2 py-1 bg-surface-container rounded font-label text-outline hover:text-on-surface">Mon-Fri</button>
-                    <button onClick={() => setPresetDays(["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"])} className="text-xs px-2 py-1 bg-surface-container rounded font-label text-outline hover:text-on-surface">Mon-Sat</button>
-                    <button onClick={() => setPresetDays(["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"])} className="text-xs px-2 py-1 bg-surface-container rounded font-label text-outline hover:text-on-surface">Sun-Sat</button>
+                    <button onClick={() => setPresetDays(["Monday","Tuesday","Wednesday","Thursday","Friday"])} className="text-xs px-2 py-1 bg-surface-container rounded font-label text-outline hover:bg-surface-container-high transition-colors">
+                      5-Day (Mon-Fri)
+                    </button>
+                    <button onClick={() => setPresetDays(["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"])} className="text-xs px-2 py-1 bg-surface-container rounded font-label text-outline hover:bg-surface-container-high transition-colors">
+                      6-Day (Mon-Sat)
+                    </button>
+                    <button onClick={() => setPresetDays(["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"])} className="text-xs px-2 py-1 bg-surface-container rounded font-label text-outline hover:bg-surface-container-high transition-colors">
+                      7-Day (All)
+                    </button>
                   </div>
 
                   <ul className="space-y-2 max-h-[300px] overflow-y-auto">
@@ -558,9 +564,15 @@ export default function AdminTimetablePage() {
                       <li key={day} className="flex justify-between items-center p-2 rounded-lg bg-surface-container border border-outline-variant/20">
                         <span className="font-label text-sm text-on-surface">{day}</span>
                         <div className="flex gap-1">
-                          <button onClick={() => handleMoveDay(ix, 'up')} disabled={ix === 0} className="w-6 h-6 flex items-center justify-center text-outline hover:text-primary disabled:opacity-30"><span className="material-symbols-outlined text-[16px]">arrow_upward</span></button>
-                          <button onClick={() => handleMoveDay(ix, 'down')} disabled={ix === timetable.days.length - 1} className="w-6 h-6 flex items-center justify-center text-outline hover:text-primary disabled:opacity-30"><span className="material-symbols-outlined text-[16px]">arrow_downward</span></button>
-                          <button onClick={() => handleRemoveDay(day)} className="w-6 h-6 flex items-center justify-center text-error/70 hover:text-error"><span className="material-symbols-outlined text-[16px]">close</span></button>
+                          <button onClick={() => handleMoveDay(ix, 'up')} disabled={ix === 0} className="w-6 h-6 flex items-center justify-center text-outline hover:text-primary disabled:opacity-30 transition-colors">
+                            <span className="material-symbols-outlined text-[16px]">arrow_upward</span>
+                          </button>
+                          <button onClick={() => handleMoveDay(ix, 'down')} disabled={ix === timetable.days.length - 1} className="w-6 h-6 flex items-center justify-center text-outline hover:text-primary disabled:opacity-30 transition-colors">
+                            <span className="material-symbols-outlined text-[16px]">arrow_downward</span>
+                          </button>
+                          <button onClick={() => handleRemoveDay(day)} className="w-6 h-6 flex items-center justify-center text-error/70 hover:text-error transition-colors">
+                            <span className="material-symbols-outlined text-[16px]">close</span>
+                          </button>
                         </div>
                       </li>
                     ))}
@@ -575,16 +587,16 @@ export default function AdminTimetablePage() {
                     <EliteInput placeholder="Label (e.g. Period 1, Break)" value={newPeriodForm.label} onChange={e => setNewPeriodForm({...newPeriodForm, label: e.target.value})} />
                     <div className="flex gap-2">
                       <div className="flex-1">
-                        <label className="text-[10px] uppercase font-label text-outline">Start Form</label>
+                        <label className="text-[10px] uppercase font-label text-outline">Start Time</label>
                         <EliteInput type="time" placeholder="08:00" value={newPeriodForm.startTime} onChange={e => setNewPeriodForm({...newPeriodForm, startTime: e.target.value})} />
                       </div>
                       <div className="flex-1">
-                        <label className="text-[10px] uppercase font-label text-outline">End Form</label>
+                        <label className="text-[10px] uppercase font-label text-outline">End Time</label>
                         <EliteInput type="time" placeholder="08:40" value={newPeriodForm.endTime} onChange={e => setNewPeriodForm({...newPeriodForm, endTime: e.target.value})} />
                       </div>
                     </div>
                     <label className="flex items-center gap-2 font-label text-sm text-on-surface py-1 cursor-pointer">
-                      <input type="checkbox" checked={newPeriodForm.isBreak} onChange={e => setNewPeriodForm({...newPeriodForm, isBreak: e.target.checked})} className="rounded text-primary-container focus:ring-primary-container" />
+                      <input type="checkbox" checked={newPeriodForm.isBreak} onChange={e => setNewPeriodForm({...newPeriodForm, isBreak: e.target.checked})} className="rounded text-primary-container" />
                       Is Break
                     </label>
                     <EliteButton variant="primary" fullWidth onClick={handleAddPeriod}>Add Period</EliteButton>
@@ -598,9 +610,15 @@ export default function AdminTimetablePage() {
                           <p className="font-mono text-[10px] text-outline mt-1">{p.startTime} - {p.endTime}</p>
                         </div>
                         <div className="flex gap-1 ml-4">
-                          <button onClick={() => handleMovePeriod(ix, 'up')} disabled={ix === 0} className="w-6 h-6 flex items-center justify-center text-outline hover:text-primary disabled:opacity-30"><span className="material-symbols-outlined text-[16px]">arrow_upward</span></button>
-                          <button onClick={() => handleMovePeriod(ix, 'down')} disabled={ix === timetable.periods.length - 1} className="w-6 h-6 flex items-center justify-center text-outline hover:text-primary disabled:opacity-30"><span className="material-symbols-outlined text-[16px]">arrow_downward</span></button>
-                          <button onClick={() => handleRemovePeriod(p.id)} className="w-6 h-6 flex items-center justify-center text-error/70 hover:text-error"><span className="material-symbols-outlined text-[16px]">delete</span></button>
+                          <button onClick={() => handleMovePeriod(ix, 'up')} disabled={ix === 0} className="w-6 h-6 flex items-center justify-center text-outline hover:text-primary disabled:opacity-30 transition-colors">
+                            <span className="material-symbols-outlined text-[16px]">arrow_upward</span>
+                          </button>
+                          <button onClick={() => handleMovePeriod(ix, 'down')} disabled={ix === timetable.periods.length - 1} className="w-6 h-6 flex items-center justify-center text-outline hover:text-primary disabled:opacity-30 transition-colors">
+                            <span className="material-symbols-outlined text-[16px]">arrow_downward</span>
+                          </button>
+                          <button onClick={() => handleRemovePeriod(p.id)} className="w-6 h-6 flex items-center justify-center text-error/70 hover:text-error transition-colors">
+                            <span className="material-symbols-outlined text-[16px]">close</span>
+                          </button>
                         </div>
                       </li>
                     ))}
@@ -625,7 +643,7 @@ export default function AdminTimetablePage() {
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="text-[10px] uppercase font-label text-outline mb-1 block">Class</label>
-                          <input list="classes-list" placeholder="e.g. S.1A" className="w-full h-11 bg-[transparent] border-b border-outline-variant/40 font-body text-sm text-on-surface focus:outline-none focus:border-primary-container transition-colors py-2 px-1 placeholder:text-outline/50" value={cellForm.class} onChange={e => setCellForm({...cellForm, class: e.target.value})} />
+                          <input list="classes-list" placeholder="e.g. S.1A" value={cellForm.class} onChange={e => setCellForm({...cellForm, class: e.target.value})} className="w-full h-11 bg-transparent border-b border-outline-variant/40 font-body text-sm text-on-surface focus:outline-none focus:border-primary" />
                         </div>
                         <div>
                           <label className="text-[10px] uppercase font-label text-outline mb-1 block">Room</label>
@@ -635,7 +653,7 @@ export default function AdminTimetablePage() {
 
                       <div>
                         <label className="text-[10px] uppercase font-label text-outline mb-1 block">Teacher</label>
-                        <input list="teachers-list" placeholder="Teacher name" className="w-full h-11 bg-[transparent] border-b border-outline-variant/40 font-body text-sm text-on-surface focus:outline-none focus:border-primary-container transition-colors py-2 px-1 placeholder:text-outline/50" value={cellForm.teacher} onChange={e => setCellForm({...cellForm, teacher: e.target.value})} />
+                        <input list="teachers-list" placeholder="Teacher name" value={cellForm.teacher} onChange={e => setCellForm({...cellForm, teacher: e.target.value})} className="w-full h-11 bg-transparent border-b border-outline-variant/40 font-body text-sm text-on-surface focus:outline-none focus:border-primary" />
                       </div>
 
                       <div>
