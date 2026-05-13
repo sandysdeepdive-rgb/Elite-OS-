@@ -413,7 +413,7 @@ export default function AdminTimetablePage() {
                   ))}
                 </select>
 
-                <EliteButton variant={isEditMode ? "primary" : "secondary"} size="sm" onClick={handleToggleEditMode}>
+                <EliteButton variant={isEditMode ? "primary" : "outlined"} size="sm" onClick={handleToggleEditMode}>
                   <span className="material-symbols-outlined text-[16px] mr-1.5">edit</span>
                   {isEditMode ? "Exit Edit Mode" : "Edit Mode"}
                 </EliteButton>
